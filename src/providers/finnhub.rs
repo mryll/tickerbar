@@ -37,16 +37,15 @@ pub fn fetch(assets: &[&Asset], http: &Http, now: DateTime<Utc>) -> Result<Vec<Q
         )
         .map_err(|e| FetchError::Other(format!("url build: {e}")))?;
         let body = http.get_with_header(url.as_str(), Some(("X-Finnhub-Token", &token)))?;
-        out.push(parse_one(a, &symbol, &body, now));
+        // A malformed body is a provider failure → propagate Err so the cache keeps stale.
+        let v: Value = serde_json::from_str(&body)
+            .map_err(|e| FetchError::Other(format!("finnhub: unexpected response: {e}")))?;
+        out.push(parse_one(a, &symbol, &v, now));
     }
     Ok(out)
 }
 
-fn parse_one(asset: &Asset, symbol: &str, body: &str, now: DateTime<Utc>) -> Quote {
-    let v: Value = match serde_json::from_str(body) {
-        Ok(v) => v,
-        Err(_) => return Quote::unavailable(asset, QuoteState::Error, now),
-    };
+fn parse_one(asset: &Asset, symbol: &str, v: &Value, now: DateTime<Utc>) -> Quote {
     let current = v.get("c").and_then(Value::as_f64);
     let change_pct = v.get("dp").and_then(Value::as_f64);
     let change_abs = v.get("d").and_then(Value::as_f64);
@@ -85,15 +84,15 @@ mod tests {
         }
     }
 
+    fn json(s: &str) -> Value {
+        serde_json::from_str(s).unwrap()
+    }
+
     #[test]
     fn a_finnhub_quote_maps_price_and_percent_change() {
         let a = asset("AAPL");
-        let q = parse_one(
-            &a,
-            "AAPL",
-            r#"{"c":201.5,"d":2.5,"dp":1.25,"t":1780000000}"#,
-            Utc::now(),
-        );
+        let v = json(r#"{"c":201.5,"d":2.5,"dp":1.25,"t":1780000000}"#);
+        let q = parse_one(&a, "AAPL", &v, Utc::now());
         assert_eq!(q.price, Some(201.5));
         assert_eq!(q.change_pct, Some(1.25));
         assert_eq!(q.direction, Some(Direction::Up));
@@ -103,14 +102,16 @@ mod tests {
     #[test]
     fn a_zero_current_price_is_missing() {
         let a = asset("XYZ");
-        let q = parse_one(&a, "XYZ", r#"{"c":0,"d":0,"dp":0,"t":0}"#, Utc::now());
+        let v = json(r#"{"c":0,"d":0,"dp":0,"t":0}"#);
+        let q = parse_one(&a, "XYZ", &v, Utc::now());
         assert_eq!(q.state, QuoteState::Missing);
     }
 
     #[test]
-    fn a_malformed_body_is_an_error() {
+    fn a_response_without_a_price_field_is_missing() {
         let a = asset("AAPL");
-        let q = parse_one(&a, "AAPL", "{nope", Utc::now());
-        assert_eq!(q.state, QuoteState::Error);
+        let v = json("{}");
+        let q = parse_one(&a, "AAPL", &v, Utc::now());
+        assert_eq!(q.state, QuoteState::Missing);
     }
 }

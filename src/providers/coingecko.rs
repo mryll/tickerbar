@@ -28,20 +28,15 @@ pub fn fetch(assets: &[&Asset], http: &Http, now: DateTime<Utc>) -> Result<Vec<Q
     )
     .map_err(|e| FetchError::Other(format!("url build: {e}")))?;
     let body = http.get(url.as_str())?;
-    Ok(parse(&body, assets, now))
+    parse(&body, assets, now)
 }
 
-fn parse(body: &str, assets: &[&Asset], now: DateTime<Utc>) -> Vec<Quote> {
-    let root: Value = match serde_json::from_str(body) {
-        Ok(v) => v,
-        Err(_) => {
-            return assets
-                .iter()
-                .map(|a| Quote::unavailable(a, QuoteState::Error, now))
-                .collect()
-        }
-    };
-    assets
+// A whole-body parse failure returns Err so the cache keeps the last good (stale) data.
+// A symbol absent from a valid response stays a per-asset Missing.
+fn parse(body: &str, assets: &[&Asset], now: DateTime<Utc>) -> Result<Vec<Quote>, FetchError> {
+    let root: Value = serde_json::from_str(body)
+        .map_err(|e| FetchError::Other(format!("coingecko: unexpected response: {e}")))?;
+    Ok(assets
         .iter()
         .map(|a| {
             let (id, quote) = match &a.source {
@@ -75,7 +70,7 @@ fn parse(body: &str, assets: &[&Asset], now: DateTime<Utc>) -> Vec<Quote> {
                 _ => Quote::unavailable(a, QuoteState::Missing, now),
             }
         })
-        .collect()
+        .collect())
 }
 
 #[cfg(test)]
@@ -98,7 +93,7 @@ mod tests {
         let body = include_str!("../../tests/fixtures/coingecko_ok.json");
         let assets = [asset("BTC", "bitcoin", "usd")];
         let refs: Vec<&Asset> = assets.iter().collect();
-        let qs = parse(body, &refs, Utc::now());
+        let qs = parse(body, &refs, Utc::now()).unwrap();
         assert_eq!(qs[0].price, Some(68000.5));
         assert_eq!(qs[0].change_pct, Some(1.23));
         assert_eq!(qs[0].direction, Some(Direction::Up));
@@ -111,7 +106,7 @@ mod tests {
         let body = include_str!("../../tests/fixtures/coingecko_ok.json");
         let assets = [asset("ETH", "ethereum", "usd")];
         let refs: Vec<&Asset> = assets.iter().collect();
-        let qs = parse(body, &refs, Utc::now());
+        let qs = parse(body, &refs, Utc::now()).unwrap();
         assert_eq!(qs[0].price, None);
         assert_eq!(qs[0].state, QuoteState::Missing);
     }
@@ -120,15 +115,14 @@ mod tests {
     fn a_symbol_absent_from_the_batch_is_reported_as_missing() {
         let assets = [asset("DOGE", "dogecoin", "usd")];
         let refs: Vec<&Asset> = assets.iter().collect();
-        let qs = parse("{}", &refs, Utc::now());
+        let qs = parse("{}", &refs, Utc::now()).unwrap();
         assert_eq!(qs[0].state, QuoteState::Missing);
     }
 
     #[test]
-    fn a_malformed_body_yields_error_quotes_without_panicking() {
+    fn a_whole_body_that_is_not_json_is_an_error() {
         let assets = [asset("BTC", "bitcoin", "usd")];
         let refs: Vec<&Asset> = assets.iter().collect();
-        let qs = parse("{not json", &refs, Utc::now());
-        assert_eq!(qs[0].state, QuoteState::Error);
+        assert!(parse("{not json", &refs, Utc::now()).is_err());
     }
 }

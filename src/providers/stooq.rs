@@ -22,10 +22,18 @@ pub fn fetch(assets: &[&Asset], http: &Http, now: DateTime<Utc>) -> Result<Vec<Q
     // Stooq expects a bare `h` flag (include header row), not `h=`.
     let full = format!("{url}&h");
     let body = http.get(&full)?;
-    Ok(parse(&body, assets, now))
+    parse(&body, assets, now)
 }
 
-fn parse(body: &str, assets: &[&Asset], now: DateTime<Utc>) -> Vec<Quote> {
+fn parse(body: &str, assets: &[&Asset], now: DateTime<Utc>) -> Result<Vec<Quote>, FetchError> {
+    // A non-CSV body (e.g. Stooq's anti-bot HTML challenge) is a whole-provider failure:
+    // return Err so the cache keeps the last good (stale) data instead of overwriting it
+    // with n/d. The real CSV always starts with the "Symbol" header.
+    if !body.trim_start().to_ascii_lowercase().starts_with("symbol") {
+        return Err(FetchError::Other(
+            "stooq: unexpected (non-CSV) response".into(),
+        ));
+    }
     // Map lowercased symbol -> close price (column index 6 with f=sd2t2ohlcv).
     let mut prices: HashMap<String, Option<f64>> = HashMap::new();
     for line in body.lines().skip(1) {
@@ -41,7 +49,7 @@ fn parse(body: &str, assets: &[&Asset], now: DateTime<Utc>) -> Vec<Quote> {
             .filter(|p| p.is_finite() && *p != 0.0);
         prices.insert(sym, price);
     }
-    assets
+    Ok(assets
         .iter()
         .map(|a| {
             let sym = match &a.source {
@@ -66,7 +74,7 @@ fn parse(body: &str, assets: &[&Asset], now: DateTime<Utc>) -> Vec<Quote> {
                 None => Quote::unavailable(a, QuoteState::Missing, now),
             }
         })
-        .collect()
+        .collect())
 }
 
 #[cfg(test)]
@@ -86,7 +94,7 @@ mod tests {
         let body = include_str!("../../tests/fixtures/stooq_ok.csv");
         let assets = [asset("aapl.us")];
         let refs: Vec<&Asset> = assets.iter().collect();
-        let qs = parse(body, &refs, Utc::now());
+        let qs = parse(body, &refs, Utc::now()).unwrap();
         assert_eq!(qs[0].price, Some(201.5));
     }
 
@@ -95,7 +103,15 @@ mod tests {
         let body = include_str!("../../tests/fixtures/stooq_ok.csv");
         let assets = [asset("spy.us")];
         let refs: Vec<&Asset> = assets.iter().collect();
-        let qs = parse(body, &refs, Utc::now());
+        let qs = parse(body, &refs, Utc::now()).unwrap();
         assert_eq!(qs[0].state, QuoteState::Missing);
+    }
+
+    #[test]
+    fn a_non_csv_anti_bot_body_is_an_error() {
+        let assets = [asset("aapl.us")];
+        let refs: Vec<&Asset> = assets.iter().collect();
+        let html = "<!DOCTYPE html><html><body>This site requires JavaScript</body></html>";
+        assert!(parse(html, &refs, Utc::now()).is_err());
     }
 }

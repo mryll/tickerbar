@@ -40,21 +40,20 @@ pub fn fetch(assets: &[&Asset], http: &Http, now: DateTime<Utc>) -> Result<Vec<Q
         )
         .map_err(|e| FetchError::Other(format!("url build: {e}")))?;
         let body = http.get(url.as_str())?;
-        out.extend(parse_base(&base, &body, &group, now));
+        out.extend(parse_base(&base, &body, &group, now)?);
     }
     Ok(out)
 }
 
-fn parse_base(base: &str, body: &str, assets: &[&Asset], now: DateTime<Utc>) -> Vec<Quote> {
-    let rows: Vec<RateRow> = match serde_json::from_str(body) {
-        Ok(v) => v,
-        Err(_) => {
-            return assets
-                .iter()
-                .map(|a| Quote::unavailable(a, QuoteState::Error, now))
-                .collect()
-        }
-    };
+// A whole-body parse failure returns Err so the cache keeps the last good (stale) data.
+fn parse_base(
+    base: &str,
+    body: &str,
+    assets: &[&Asset],
+    now: DateTime<Utc>,
+) -> Result<Vec<Quote>, FetchError> {
+    let rows: Vec<RateRow> = serde_json::from_str(body)
+        .map_err(|e| FetchError::Other(format!("frankfurter: unexpected response: {e}")))?;
     let rates: HashMap<String, f64> = rows
         .iter()
         .filter_map(|r| r.rate.map(|v| (r.quote.to_uppercase(), v)))
@@ -65,7 +64,7 @@ fn parse_base(base: &str, body: &str, assets: &[&Asset], now: DateTime<Utc>) -> 
         .and_then(|d| chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").ok())
         .and_then(|d| d.and_hms_opt(0, 0, 0))
         .map(|dt| DateTime::<Utc>::from_naive_utc_and_offset(dt, Utc));
-    assets
+    Ok(assets
         .iter()
         .map(|a| {
             let quote = match &a.source {
@@ -94,7 +93,7 @@ fn parse_base(base: &str, body: &str, assets: &[&Asset], now: DateTime<Utc>) -> 
                 None => Quote::unavailable(a, QuoteState::Missing, now),
             }
         })
-        .collect()
+        .collect())
 }
 
 #[cfg(test)]
@@ -117,7 +116,7 @@ mod tests {
         let body = include_str!("../../tests/fixtures/frankfurter_eur.json");
         let assets = [asset("eur", "usd")];
         let refs: Vec<&Asset> = assets.iter().collect();
-        let qs = parse_base("eur", body, &refs, Utc::now());
+        let qs = parse_base("eur", body, &refs, Utc::now()).unwrap();
         assert_eq!(qs[0].price, Some(1.08));
         assert!(qs[0].as_of.is_some());
     }
@@ -127,7 +126,14 @@ mod tests {
         let body = include_str!("../../tests/fixtures/frankfurter_eur.json");
         let assets = [asset("eur", "jpy")];
         let refs: Vec<&Asset> = assets.iter().collect();
-        let qs = parse_base("eur", body, &refs, Utc::now());
+        let qs = parse_base("eur", body, &refs, Utc::now()).unwrap();
         assert_eq!(qs[0].state, QuoteState::Missing);
+    }
+
+    #[test]
+    fn a_whole_body_that_is_not_json_is_an_error() {
+        let assets = [asset("eur", "usd")];
+        let refs: Vec<&Asset> = assets.iter().collect();
+        assert!(parse_base("eur", "<html>nope</html>", &refs, Utc::now()).is_err());
     }
 }

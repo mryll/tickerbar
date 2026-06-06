@@ -114,17 +114,24 @@ pub fn bar_text(quotes: &[Quote], d: &Display, epoch: u64) -> String {
         .join("   ")
 }
 
-/// Lifecycle class from ALL quotes; direction class from the VISIBLE quotes only.
+/// Lifecycle classes from ALL quotes; direction class from the VISIBLE quotes only.
+/// `partial` and `stale` can both apply (some missing AND some stale), so styling keeps
+/// both signals instead of one masking the other.
 pub fn module_class(all: &[Quote], visible: &[&Quote]) -> Vec<String> {
-    let lifecycle = if all.iter().all(|q| q.price.is_none()) {
-        "error"
-    } else if all.iter().any(|q| q.price.is_none()) {
-        "partial"
-    } else if all.iter().any(|q| q.state == QuoteState::Stale) {
-        "stale"
+    let mut classes: Vec<String> = Vec::new();
+    if all.iter().all(|q| q.price.is_none()) {
+        classes.push("error".to_string());
     } else {
-        "ok"
-    };
+        if all.iter().any(|q| q.price.is_none()) {
+            classes.push("partial".to_string());
+        }
+        if all.iter().any(|q| q.state == QuoteState::Stale) {
+            classes.push("stale".to_string());
+        }
+        if classes.is_empty() {
+            classes.push("ok".to_string());
+        }
+    }
 
     let dirs: Vec<Direction> = visible.iter().filter_map(|q| q.direction).collect();
     let direction = match dirs.first() {
@@ -136,7 +143,8 @@ pub fn module_class(all: &[Quote], visible: &[&Quote]) -> Vec<String> {
         Some(_) => "mixed",
         None => "flat",
     };
-    vec![lifecycle.to_string(), direction.to_string()]
+    classes.push(direction.to_string());
+    classes
 }
 
 pub fn build(
@@ -186,31 +194,46 @@ fn build_tooltip(
         .max()
         .unwrap_or(0);
 
-    let order = [
+    // Group by asset CLASS (so e.g. Stooq + Finnhub share one "Stocks" section), in a
+    // fixed class order. Config order is preserved within each class.
+    let classes = ["Crypto", "Fiat · ARS", "Stocks", "Forex"];
+    let mut rows: Vec<String> = Vec::new();
+    for class in classes {
+        let group: Vec<&Quote> = quotes
+            .iter()
+            .filter(|q| group_title(q.source) == class)
+            .collect();
+        if group.is_empty() {
+            continue;
+        }
+        // Show the per-row source tag only when a class mixes providers (e.g. stooq+finnhub).
+        let multi = group
+            .iter()
+            .map(|q| q.source)
+            .collect::<std::collections::BTreeSet<_>>()
+            .len()
+            > 1;
+        rows.push(format!(
+            "  {} {}",
+            waybar::fg(&colors.accent, icons.kind_glyph(group[0].source)),
+            waybar::bold_fg(&colors.text, class)
+        ));
+        for q in &group {
+            rows.push(render_row(
+                q, label_w, price_w, change_w, now, colors, multi,
+            ));
+        }
+    }
+
+    let title = waybar::bold_fg(&colors.accent, "tickerbar");
+    let footer_order = [
         ProviderKind::CoinGecko,
         ProviderKind::DolarApi,
         ProviderKind::Stooq,
         ProviderKind::Finnhub,
         ProviderKind::Frankfurter,
     ];
-    let mut rows: Vec<String> = Vec::new();
-    for kind in order {
-        let group: Vec<&Quote> = quotes.iter().filter(|q| q.source == kind).collect();
-        if group.is_empty() {
-            continue;
-        }
-        rows.push(format!(
-            "  {} {}",
-            waybar::fg(&colors.accent, icons.kind_glyph(kind)),
-            waybar::bold_fg(&colors.text, group_title(kind))
-        ));
-        for q in group {
-            rows.push(render_row(q, label_w, price_w, change_w, now, colors));
-        }
-    }
-
-    let title = waybar::bold_fg(&colors.accent, "tickerbar");
-    let sources: Vec<&str> = order
+    let sources: Vec<&str> = footer_order
         .iter()
         .filter(|k| quotes.iter().any(|q| q.source == **k))
         .map(|k| k.as_str())
@@ -253,6 +276,7 @@ fn render_row(
     change_w: usize,
     now: DateTime<Utc>,
     colors: &ThemeColors,
+    show_source: bool,
 ) -> String {
     let dir_color = match q.direction {
         Some(Direction::Up) => &colors.green,
@@ -270,16 +294,22 @@ fn render_row(
     } else {
         pad_left(&waybar::fg(dir_color, &change_plain), change_w)
     };
-    let note = match q.state {
-        QuoteState::Stale => waybar::fg(
-            &colors.dim,
-            &format!(
-                "  (stale {})",
-                fmt_age(now.signed_duration_since(q.fetched_at))
-            ),
-        ),
-        QuoteState::Missing | QuoteState::Error => waybar::fg(&colors.dim, "  (n/d)"),
-        QuoteState::Fresh => String::new(),
+    let mut tail = String::new();
+    if show_source {
+        tail.push_str(&format!("  · {}", q.source.as_str()));
+    }
+    match q.state {
+        QuoteState::Stale => tail.push_str(&format!(
+            "  (stale {})",
+            fmt_age(now.signed_duration_since(q.fetched_at))
+        )),
+        QuoteState::Missing | QuoteState::Error => tail.push_str("  (n/d)"),
+        QuoteState::Fresh => {}
+    }
+    let note = if tail.is_empty() {
+        String::new()
+    } else {
+        waybar::fg(&colors.dim, &tail)
     };
     format!("    {}  {}  {}{}", label, price, change, note)
 }

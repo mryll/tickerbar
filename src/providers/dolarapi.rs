@@ -17,20 +17,15 @@ struct Rate {
 
 pub fn fetch(assets: &[&Asset], http: &Http, now: DateTime<Utc>) -> Result<Vec<Quote>, FetchError> {
     let body = http.get(URL)?;
-    Ok(parse(&body, assets, now))
+    parse(&body, assets, now)
 }
 
-fn parse(body: &str, assets: &[&Asset], now: DateTime<Utc>) -> Vec<Quote> {
-    let rates: Vec<Rate> = match serde_json::from_str(body) {
-        Ok(v) => v,
-        Err(_) => {
-            return assets
-                .iter()
-                .map(|a| Quote::unavailable(a, QuoteState::Error, now))
-                .collect()
-        }
-    };
-    assets
+// A whole-body parse failure returns Err so the cache keeps the last good (stale) data.
+// A missing `casa` within a valid response stays a per-asset Missing.
+fn parse(body: &str, assets: &[&Asset], now: DateTime<Utc>) -> Result<Vec<Quote>, FetchError> {
+    let rates: Vec<Rate> = serde_json::from_str(body)
+        .map_err(|e| FetchError::Other(format!("dolarapi: unexpected response: {e}")))?;
+    Ok(assets
         .iter()
         .map(|a| {
             let (casa, side) = match &a.source {
@@ -70,7 +65,7 @@ fn parse(body: &str, assets: &[&Asset], now: DateTime<Utc>) -> Vec<Quote> {
                 None => Quote::unavailable(a, QuoteState::Missing, now),
             }
         })
-        .collect()
+        .collect())
 }
 
 #[cfg(test)]
@@ -93,7 +88,7 @@ mod tests {
         let body = include_str!("../../tests/fixtures/dolarapi_ok.json");
         let assets = [asset("blue", Side::Sell)];
         let refs: Vec<&Asset> = assets.iter().collect();
-        let qs = parse(body, &refs, Utc::now());
+        let qs = parse(body, &refs, Utc::now()).unwrap();
         assert_eq!(qs[0].price, Some(1030.0));
         assert_eq!(qs[0].base, "usd");
         assert_eq!(qs[0].quote, "ars");
@@ -105,7 +100,7 @@ mod tests {
         let body = include_str!("../../tests/fixtures/dolarapi_ok.json");
         let assets = [asset("blue", Side::Buy)];
         let refs: Vec<&Asset> = assets.iter().collect();
-        let qs = parse(body, &refs, Utc::now());
+        let qs = parse(body, &refs, Utc::now()).unwrap();
         assert_eq!(qs[0].price, Some(1010.0));
     }
 
@@ -114,7 +109,14 @@ mod tests {
         let body = include_str!("../../tests/fixtures/dolarapi_ok.json");
         let assets = [asset("cripto", Side::Sell)];
         let refs: Vec<&Asset> = assets.iter().collect();
-        let qs = parse(body, &refs, Utc::now());
+        let qs = parse(body, &refs, Utc::now()).unwrap();
         assert_eq!(qs[0].state, QuoteState::Missing);
+    }
+
+    #[test]
+    fn a_whole_body_that_is_not_json_is_an_error() {
+        let assets = [asset("blue", Side::Sell)];
+        let refs: Vec<&Asset> = assets.iter().collect();
+        assert!(parse("<html>nope</html>", &refs, Utc::now()).is_err());
     }
 }

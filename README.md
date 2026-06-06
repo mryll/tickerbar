@@ -3,16 +3,23 @@
 [![AUR version](https://img.shields.io/aur/version/tickerbar)](https://aur.archlinux.org/packages/tickerbar)
 [![License: MIT](https://img.shields.io/github/license/mryll/tickerbar)](LICENSE)
 
-A price ticker widget for [Waybar](https://github.com/Alexays/Waybar): crypto, the Argentine dollar (oficial/blue/MEP), and forex — in one module, with **no API key** for the core providers.
+A multi-market price ticker for [Waybar](https://github.com/Alexays/Waybar): crypto, stocks & indices, forex, and fiat currencies in one module — with **no API key**.
 
-![screenshot](screenshot.png)
+<p align="center">
+  <img src="screenshots/tooltip-simple.png" alt="tickerbar tooltip" width="380">
+</p>
 
 ## Why tickerbar?
 
-- **One widget, several markets.** Crypto, Argentine-peso rates, and forex pairs side by side, each from the best free source.
-- **No API key for the core.** CoinGecko, DolarAPI, and Frankfurter all work without signing up for anything.
+- **Many markets, one widget, no API key.** Crypto (CoinGecko), US stocks & indices (CNBC), forex (ECB / Frankfurter) and fiat — each from the best free, key-less source. Track BTC, AAPL, the S&P 500 and EUR/USD side by side.
 - **Never breaks your bar.** Any failure — a dead API, a rate limit, a malformed response, even a corrupt config — still prints valid Waybar JSON and exits 0. A down provider never blanks the others.
-- **A tooltip worth opening.** A column-aligned table grouped by asset class, color-coded up/down, that picks up your [Omarchy](https://omarchy.org) theme colors automatically.
+- **A tooltip worth opening.** A column-aligned table grouped by asset class, color-coded up/down, that wraps long watchlists into stacked columns (great for narrow/vertical monitors) and picks up your [Omarchy](https://omarchy.org) theme colors.
+- **Market-hours aware.** Closed markets aren't polled and show `⏸ closed` — only crypto runs 24/7.
+- **Argentine market, too.** As a bonus, full BYMA support via data912: the blue/MEP dollar plus local stocks, bonds, CEDEARs and ONs in pesos.
+
+The tooltip groups your watchlist by asset class and wraps into columns as it grows:
+
+![tickerbar tooltip with a large watchlist](screenshots/tooltip-full.png)
 
 ## Features
 

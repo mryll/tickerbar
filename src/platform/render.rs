@@ -266,6 +266,8 @@ fn build_tooltip(
     colors: &ThemeColors,
     now: DateTime<Utc>,
 ) -> String {
+    // fetch_all returns quotes in config order, so assets and quotes stay aligned 1:1.
+    debug_assert_eq!(assets.len(), quotes.len());
     // Inner data-column widths are GLOBAL (computed across all quotes) so every data row is
     // uniform regardless of which tooltip-column it lands in.
     let label_w = quotes
@@ -476,6 +478,8 @@ fn chunk_columns(lines: Vec<TooltipLine>, n: usize) -> Vec<Vec<TooltipLine>> {
             cols[i + 1].insert(0, h);
         }
     }
+    // Drop any column emptied by the orphan move (e.g. tooltip_rows_per_column = 1).
+    cols.retain(|c| !c.is_empty());
     // A column that starts mid-section gets a continuation header.
     for col in cols.iter_mut().skip(1) {
         let cont_group = match col.first() {
@@ -710,6 +714,13 @@ mod tests {
                 ..
             })
         ));
+    }
+
+    #[test]
+    fn a_single_row_per_column_does_not_produce_empty_columns() {
+        let lines = vec![header(TooltipGroup::Crypto), row(TooltipGroup::Crypto)];
+        let cols = chunk_columns(lines, 1);
+        assert!(cols.iter().all(|c| !c.is_empty()));
     }
 
     #[test]

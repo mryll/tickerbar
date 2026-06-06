@@ -36,7 +36,7 @@ fn mk_quote(
     pct: Option<f64>,
     now: DateTime<Utc>,
 ) -> Quote {
-    match c.filter(|p| p.is_finite() && *p != 0.0) {
+    match c.filter(|p| p.is_finite() && *p > 0.0) {
         Some(p) => Quote {
             label: asset.label.clone(),
             base: symbol.to_string(),
@@ -155,6 +155,15 @@ mod tests {
         let q = &parse_panel(Panel::Acciones, body, &flat_refs, Utc::now()).unwrap()[0];
         assert_eq!(q.price, Some(100.0));
         assert_eq!(q.direction, Some(Direction::Flat));
+    }
+
+    #[test]
+    fn a_negative_price_is_missing() {
+        let body = include_str!("../../tests/fixtures/data912_stocks.json");
+        let assets = [asset("NEG")];
+        let refs: Vec<&Asset> = assets.iter().collect();
+        let qs = parse_panel(Panel::Acciones, body, &refs, Utc::now()).unwrap();
+        assert_eq!(qs[0].state, QuoteState::Missing);
     }
 
     #[test]

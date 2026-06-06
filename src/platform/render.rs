@@ -80,11 +80,26 @@ fn group_title(k: ProviderKind) -> &'static str {
     }
 }
 
-fn render_one(q: &Quote, fmt: &str, icons: &IconSet) -> String {
+fn render_one(q: &Quote, fmt: &str, icons: &IconSet, colors: &ThemeColors) -> String {
+    let change_plain = fmt_change(q.change_pct);
+    let arrow = icons.arrow(q.direction);
+    // Color only the arrow + change% by direction (green up / red down); the rest of the bar
+    // text stays the theme foreground. Bar text is rendered with Pango markup.
+    let (arrow_s, change_s) = match q.direction {
+        Some(Direction::Up) => (
+            waybar::fg(&colors.green, arrow),
+            waybar::fg(&colors.green, &change_plain),
+        ),
+        Some(Direction::Down) => (
+            waybar::fg(&colors.red, arrow),
+            waybar::fg(&colors.red, &change_plain),
+        ),
+        _ => (arrow.to_string(), change_plain),
+    };
     fmt.replace("{label}", &waybar::pango_escape(&q.label))
         .replace("{price}", &fmt_price(q.price))
-        .replace("{change_pct}", &fmt_change(q.change_pct))
-        .replace("{arrow}", icons.arrow(q.direction))
+        .replace("{change_pct}", &change_s)
+        .replace("{arrow}", &arrow_s)
         .replace("{glyph}", icons.kind_glyph(q.source))
         .trim()
         .to_string()
@@ -105,11 +120,11 @@ fn visible<'a>(quotes: &'a [Quote], d: &Display, epoch: u64) -> Vec<&'a Quote> {
     }
 }
 
-pub fn bar_text(quotes: &[Quote], d: &Display, epoch: u64) -> String {
+pub fn bar_text(quotes: &[Quote], d: &Display, epoch: u64, colors: &ThemeColors) -> String {
     let icons = IconSet::from_name(&d.icons);
     visible(quotes, d, epoch)
         .iter()
-        .map(|q| render_one(q, &d.bar_format, &icons))
+        .map(|q| render_one(q, &d.bar_format, &icons, colors))
         .collect::<Vec<_>>()
         .join("   ")
 }
@@ -155,7 +170,7 @@ pub fn build(
 ) -> WaybarOutput {
     let epoch = now.timestamp().max(0) as u64;
     let vis = visible(quotes, &cfg.display, epoch);
-    let text = bar_text(quotes, &cfg.display, epoch);
+    let text = bar_text(quotes, &cfg.display, epoch, colors);
     let class = module_class(quotes, &vis);
     // Tooltip ALWAYS uses the Nerd icon set for consistent monospace alignment, regardless
     // of the configured bar icon set (Pango renders emoji from a different font with
@@ -359,7 +374,12 @@ mod tests {
             quote("B", Some(2.0), Some(Direction::Up), QuoteState::Fresh),
             quote("C", Some(3.0), Some(Direction::Up), QuoteState::Fresh),
         ];
-        let text = bar_text(&qs, &disp(DisplayMode::Fixed, 2), 0);
+        let text = bar_text(
+            &qs,
+            &disp(DisplayMode::Fixed, 2),
+            0,
+            &ThemeColors::default(),
+        );
         assert!(text.contains('A') && text.contains('B'));
         assert!(!text.contains('C'));
     }
@@ -371,8 +391,8 @@ mod tests {
             quote("B", Some(2.0), None, QuoteState::Fresh),
         ];
         let d = disp(DisplayMode::Rotate, 1);
-        assert!(bar_text(&qs, &d, 0).contains('A'));
-        assert!(bar_text(&qs, &d, 5).contains('B'));
+        assert!(bar_text(&qs, &d, 0, &ThemeColors::default()).contains('A'));
+        assert!(bar_text(&qs, &d, 5, &ThemeColors::default()).contains('B'));
     }
 
     #[test]
@@ -410,7 +430,12 @@ mod tests {
     #[test]
     fn a_missing_price_renders_as_a_dash() {
         let qs = vec![quote("A", None, None, QuoteState::Missing)];
-        let text = bar_text(&qs, &disp(DisplayMode::Fixed, 3), 0);
+        let text = bar_text(
+            &qs,
+            &disp(DisplayMode::Fixed, 3),
+            0,
+            &ThemeColors::default(),
+        );
         assert!(text.contains('—'));
     }
 

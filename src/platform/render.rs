@@ -81,23 +81,26 @@ fn group_title(k: ProviderKind) -> &'static str {
 }
 
 fn render_one(q: &Quote, fmt: &str, icons: &IconSet, colors: &ThemeColors) -> String {
+    let price_plain = fmt_price(q.price);
     let change_plain = fmt_change(q.change_pct);
     let arrow = icons.arrow(q.direction);
-    // Color only the arrow + change% by direction (green up / red down); the rest of the bar
-    // text stays the theme foreground. Bar text is rendered with Pango markup.
-    let (arrow_s, change_s) = match q.direction {
+    // Color the price + arrow + change% by direction (green up / red down), matching the
+    // tooltip; label and glyph stay the theme foreground. Bar text is rendered with Pango.
+    let (price_s, arrow_s, change_s) = match q.direction {
         Some(Direction::Up) => (
+            waybar::fg(&colors.green, &price_plain),
             waybar::fg(&colors.green, arrow),
             waybar::fg(&colors.green, &change_plain),
         ),
         Some(Direction::Down) => (
+            waybar::fg(&colors.red, &price_plain),
             waybar::fg(&colors.red, arrow),
             waybar::fg(&colors.red, &change_plain),
         ),
-        _ => (arrow.to_string(), change_plain),
+        _ => (price_plain, arrow.to_string(), change_plain),
     };
     fmt.replace("{label}", &waybar::pango_escape(&q.label))
-        .replace("{price}", &fmt_price(q.price))
+        .replace("{price}", &price_s)
         .replace("{change_pct}", &change_s)
         .replace("{arrow}", &arrow_s)
         .replace("{glyph}", icons.kind_glyph(q.source))

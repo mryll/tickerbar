@@ -109,7 +109,26 @@ pub struct Config {
 
 impl Config {
     pub fn parse_str(s: &str) -> Result<Config, String> {
-        toml::from_str(s).map_err(|e| format!("config parse error: {e}"))
+        let cfg: Config = toml::from_str(s).map_err(|e| format!("config parse error: {e}"))?;
+        // Catch typoed provider keys in [market_hours.providers] instead of ignoring them.
+        // Keep in sync with ProviderKind::as_str.
+        const KNOWN_PROVIDERS: &[&str] = &[
+            "coingecko",
+            "dolarapi",
+            "stooq",
+            "frankfurter",
+            "finnhub",
+            "cnbc",
+            "data912",
+        ];
+        for k in cfg.market_hours.providers.keys() {
+            if !KNOWN_PROVIDERS.contains(&k.as_str()) {
+                return Err(format!(
+                    "unknown provider in [market_hours.providers]: '{k}'"
+                ));
+            }
+        }
+        Ok(cfg)
     }
 
     pub fn load(path: Option<&PathBuf>) -> Result<Config, String> {
@@ -163,6 +182,20 @@ side = "sell"
     fn an_unknown_provider_is_rejected() {
         let bad = "[[asset]]\nlabel=\"x\"\nprovider=\"nasdaq\"\nsymbol=\"x\"\n";
         assert!(Config::parse_str(bad).is_err());
+    }
+
+    #[test]
+    fn a_typoed_market_hours_provider_key_is_rejected() {
+        let bad = "[market_hours.providers.cncb]\nenabled = false\n";
+        assert!(Config::parse_str(bad).is_err());
+    }
+
+    #[test]
+    fn a_known_market_hours_provider_key_is_accepted() {
+        let ok = "[market_hours.providers.cnbc]\nenabled = false\n";
+        let cfg = Config::parse_str(ok).unwrap();
+        assert!(!cfg.market_hours.applies_to("cnbc"));
+        assert!(cfg.market_hours.applies_to("coingecko"));
     }
 
     #[test]

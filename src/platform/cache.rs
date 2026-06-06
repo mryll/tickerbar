@@ -109,7 +109,20 @@ where
     let existing = read_record(&path);
 
     if !have_lock {
-        return existing.map(|r| served_stale(r.quotes)).unwrap_or_default();
+        // Another instance is fetching: serve what we have without blocking. A closed-market
+        // cache that is already the last close is served as-is (not stale).
+        return match existing {
+            Some(rec) => {
+                let is_close = matches!(&policy,
+                    FetchPolicy::Closed { last_close } if rec.fetched_at >= *last_close);
+                if is_close {
+                    rec.quotes
+                } else {
+                    served_stale(rec.quotes)
+                }
+            }
+            None => Vec::new(),
+        };
     }
 
     match &policy {
@@ -119,6 +132,14 @@ where
                     // Legitimate last close — serve as-is (not stale), no fetch.
                     unlock(lock);
                     return rec.quotes.clone();
+                }
+                // Cache predates the close → we'll fetch once, but still honor a persisted
+                // 429 backoff so we don't hammer the endpoint during the backoff window.
+                if let Some(until) = rec.backoff_until {
+                    if now < until {
+                        unlock(lock);
+                        return served_stale(rec.quotes.clone());
+                    }
                 }
             }
             // Cache missing or older than the last close — fall through to one fetch.
@@ -452,6 +473,49 @@ mod tests {
         );
         assert!(called, "stale-vs-close cache must trigger one fetch");
         assert_eq!(out[0].price, Some(777.0));
+    }
+
+    #[test]
+    fn closed_market_honors_persisted_backoff_even_when_cache_predates_last_close() {
+        let dir = tempdir();
+        let t0 = Utc::now() - Duration::seconds(600);
+        let _ = get_or_fetch(
+            &dir,
+            "kc4",
+            Duration::seconds(0),
+            t0,
+            FetchPolicy::Normal,
+            || Ok(vec![q(5.0, t0)]),
+        );
+        // Persist a 429 backoff window.
+        let _ = get_or_fetch(
+            &dir,
+            "kc4",
+            Duration::seconds(0),
+            Utc::now(),
+            FetchPolicy::Normal,
+            || {
+                Err(FetchError::RateLimited {
+                    retry_after: Some(300),
+                })
+            },
+        );
+        // Closed: cache predates last_close, but we're still inside the backoff window.
+        let last_close = Utc::now() + Duration::seconds(60);
+        let mut called = false;
+        let out = get_or_fetch(
+            &dir,
+            "kc4",
+            Duration::seconds(0),
+            Utc::now(),
+            FetchPolicy::Closed { last_close },
+            || {
+                called = true;
+                Ok(vec![])
+            },
+        );
+        assert!(!called, "closed mode must honor a persisted 429 backoff");
+        assert_eq!(out[0].state, QuoteState::Stale);
     }
 
     #[test]

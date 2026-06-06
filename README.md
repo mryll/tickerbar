@@ -1,7 +1,7 @@
 # tickerbar
 
 [![AUR version](https://img.shields.io/aur/version/tickerbar)](https://aur.archlinux.org/packages/tickerbar)
-[![License: MIT](https://img.shields.io/github/license/mryll/tickerbar)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 A multi-market price ticker for [Waybar](https://github.com/Alexays/Waybar): crypto, stocks & indices, commodities, forex, Treasury yields, and fiat currencies in one module — with **no API key**.
 

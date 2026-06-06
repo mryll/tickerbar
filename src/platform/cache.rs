@@ -11,6 +11,15 @@ use crate::platform::model::{FetchError, Quote, QuoteState};
 
 pub const SCHEMA_VERSION: u32 = 1;
 
+/// How `get_or_fetch` should treat the cache for this call.
+pub enum FetchPolicy {
+    /// Normal operation: serve if fresh within TTL, honor 429 backoff, else fetch.
+    Normal,
+    /// Market closed: a cached quote fetched at/after `last_close` is the legitimate last
+    /// close — serve it as-is (not stale, no fetch). Otherwise fetch once.
+    Closed { last_close: DateTime<Utc> },
+}
+
 #[derive(Serialize, Deserialize)]
 struct Record {
     schema_version: u32,
@@ -78,6 +87,7 @@ pub fn get_or_fetch<F>(
     key: &str,
     ttl: Duration,
     now: DateTime<Utc>,
+    policy: FetchPolicy,
     fetch_fn: F,
 ) -> Vec<Quote>
 where
@@ -102,15 +112,29 @@ where
         return existing.map(|r| served_stale(r.quotes)).unwrap_or_default();
     }
 
-    if let Some(rec) = &existing {
-        if now.signed_duration_since(rec.fetched_at) < ttl {
-            unlock(lock);
-            return rec.quotes.clone();
+    match &policy {
+        FetchPolicy::Closed { last_close } => {
+            if let Some(rec) = &existing {
+                if rec.fetched_at >= *last_close {
+                    // Legitimate last close — serve as-is (not stale), no fetch.
+                    unlock(lock);
+                    return rec.quotes.clone();
+                }
+            }
+            // Cache missing or older than the last close — fall through to one fetch.
         }
-        if let Some(until) = rec.backoff_until {
-            if now < until {
-                unlock(lock);
-                return served_stale(rec.quotes.clone());
+        FetchPolicy::Normal => {
+            if let Some(rec) = &existing {
+                if now.signed_duration_since(rec.fetched_at) < ttl {
+                    unlock(lock);
+                    return rec.quotes.clone();
+                }
+                if let Some(until) = rec.backoff_until {
+                    if now < until {
+                        unlock(lock);
+                        return served_stale(rec.quotes.clone());
+                    }
+                }
             }
         }
     }
@@ -192,9 +216,14 @@ mod tests {
     fn a_successful_fetch_is_cached_and_returned_fresh() {
         let dir = tempdir();
         let now = Utc::now();
-        let out = get_or_fetch(&dir, "k1", Duration::seconds(60), now, || {
-            Ok(vec![q(100.0, now)])
-        });
+        let out = get_or_fetch(
+            &dir,
+            "k1",
+            Duration::seconds(60),
+            now,
+            FetchPolicy::Normal,
+            || Ok(vec![q(100.0, now)]),
+        );
         assert_eq!(out[0].state, QuoteState::Fresh);
         assert_eq!(out[0].price, Some(100.0));
     }
@@ -203,14 +232,26 @@ mod tests {
     fn a_fresh_cache_within_ttl_skips_the_fetch() {
         let dir = tempdir();
         let now = Utc::now();
-        let _ = get_or_fetch(&dir, "k7", Duration::seconds(60), now, || {
-            Ok(vec![q(10.0, now)])
-        });
+        let _ = get_or_fetch(
+            &dir,
+            "k7",
+            Duration::seconds(60),
+            now,
+            FetchPolicy::Normal,
+            || Ok(vec![q(10.0, now)]),
+        );
         let mut called = false;
-        let out = get_or_fetch(&dir, "k7", Duration::seconds(60), now, || {
-            called = true;
-            Ok(vec![q(99.0, now)])
-        });
+        let out = get_or_fetch(
+            &dir,
+            "k7",
+            Duration::seconds(60),
+            now,
+            FetchPolicy::Normal,
+            || {
+                called = true;
+                Ok(vec![q(99.0, now)])
+            },
+        );
         assert!(!called, "fetch must be skipped when cache is fresh");
         assert_eq!(out[0].price, Some(10.0));
     }
@@ -219,13 +260,23 @@ mod tests {
     fn a_provider_error_falls_back_to_stale_cache_marked_stale() {
         let dir = tempdir();
         let t0 = Utc::now() - Duration::seconds(120);
-        let _ = get_or_fetch(&dir, "k2", Duration::seconds(60), t0, || {
-            Ok(vec![q(100.0, t0)])
-        });
+        let _ = get_or_fetch(
+            &dir,
+            "k2",
+            Duration::seconds(60),
+            t0,
+            FetchPolicy::Normal,
+            || Ok(vec![q(100.0, t0)]),
+        );
         let now = Utc::now();
-        let out = get_or_fetch(&dir, "k2", Duration::seconds(60), now, || {
-            Err(FetchError::Other("down".into()))
-        });
+        let out = get_or_fetch(
+            &dir,
+            "k2",
+            Duration::seconds(60),
+            now,
+            FetchPolicy::Normal,
+            || Err(FetchError::Other("down".into())),
+        );
         assert_eq!(out[0].state, QuoteState::Stale);
         assert_eq!(out[0].price, Some(100.0));
     }
@@ -234,20 +285,39 @@ mod tests {
     fn a_rate_limited_provider_serves_stale_and_persists_a_backoff_window() {
         let dir = tempdir();
         let t0 = Utc::now();
-        let _ = get_or_fetch(&dir, "k3", Duration::seconds(0), t0, || {
-            Ok(vec![q(100.0, t0)])
-        });
-        let out = get_or_fetch(&dir, "k3", Duration::seconds(0), Utc::now(), || {
-            Err(FetchError::RateLimited {
-                retry_after: Some(300),
-            })
-        });
+        let _ = get_or_fetch(
+            &dir,
+            "k3",
+            Duration::seconds(0),
+            t0,
+            FetchPolicy::Normal,
+            || Ok(vec![q(100.0, t0)]),
+        );
+        let out = get_or_fetch(
+            &dir,
+            "k3",
+            Duration::seconds(0),
+            Utc::now(),
+            FetchPolicy::Normal,
+            || {
+                Err(FetchError::RateLimited {
+                    retry_after: Some(300),
+                })
+            },
+        );
         assert_eq!(out[0].state, QuoteState::Stale);
         let mut called = false;
-        let out2 = get_or_fetch(&dir, "k3", Duration::seconds(0), Utc::now(), || {
-            called = true;
-            Ok(vec![])
-        });
+        let out2 = get_or_fetch(
+            &dir,
+            "k3",
+            Duration::seconds(0),
+            Utc::now(),
+            FetchPolicy::Normal,
+            || {
+                called = true;
+                Ok(vec![])
+            },
+        );
         assert!(!called, "fetch must be skipped during backoff");
         assert_eq!(out2[0].state, QuoteState::Stale);
     }
@@ -256,9 +326,14 @@ mod tests {
     fn a_held_lock_serves_stale_without_fetching() {
         let dir = tempdir();
         let t0 = Utc::now() - Duration::seconds(120);
-        let _ = get_or_fetch(&dir, "k6", Duration::seconds(60), t0, || {
-            Ok(vec![q(50.0, t0)])
-        });
+        let _ = get_or_fetch(
+            &dir,
+            "k6",
+            Duration::seconds(60),
+            t0,
+            FetchPolicy::Normal,
+            || Ok(vec![q(50.0, t0)]),
+        );
         let lockp = key_file(&dir, "k6").with_extension("lock");
         let f = std::fs::OpenOptions::new()
             .create(true)
@@ -268,10 +343,17 @@ mod tests {
             .unwrap();
         FileExt::lock_exclusive(&f).unwrap();
         let mut called = false;
-        let out = get_or_fetch(&dir, "k6", Duration::seconds(0), Utc::now(), || {
-            called = true;
-            Ok(vec![])
-        });
+        let out = get_or_fetch(
+            &dir,
+            "k6",
+            Duration::seconds(0),
+            Utc::now(),
+            FetchPolicy::Normal,
+            || {
+                called = true;
+                Ok(vec![])
+            },
+        );
         assert!(!called, "fetch must be skipped when the lock is held");
         assert_eq!(out[0].state, QuoteState::Stale);
         FileExt::unlock(&f).ok();
@@ -280,9 +362,14 @@ mod tests {
     #[test]
     fn no_cache_and_a_failed_fetch_yields_an_empty_result() {
         let dir = tempdir();
-        let out = get_or_fetch(&dir, "k4", Duration::seconds(60), Utc::now(), || {
-            Err(FetchError::Other("x".into()))
-        });
+        let out = get_or_fetch(
+            &dir,
+            "k4",
+            Duration::seconds(60),
+            Utc::now(),
+            FetchPolicy::Normal,
+            || Err(FetchError::Other("x".into())),
+        );
         assert!(out.is_empty());
     }
 
@@ -292,9 +379,99 @@ mod tests {
         let path = key_file(&dir, "k5");
         std::fs::write(&path, b"{not json").unwrap();
         let now = Utc::now();
-        let out = get_or_fetch(&dir, "k5", Duration::seconds(60), now, || {
-            Ok(vec![q(7.0, now)])
-        });
+        let out = get_or_fetch(
+            &dir,
+            "k5",
+            Duration::seconds(60),
+            now,
+            FetchPolicy::Normal,
+            || Ok(vec![q(7.0, now)]),
+        );
         assert_eq!(out[0].price, Some(7.0));
+    }
+
+    #[test]
+    fn closed_market_serves_cache_fetched_after_the_last_close_without_fetching() {
+        let dir = tempdir();
+        let t0 = Utc::now() - Duration::seconds(120);
+        let _ = get_or_fetch(
+            &dir,
+            "kc1",
+            Duration::seconds(60),
+            t0,
+            FetchPolicy::Normal,
+            || Ok(vec![q(500.0, t0)]),
+        );
+        // last_close is BEFORE the cache was written (t0), so the cache is the legit close.
+        let last_close = t0 - Duration::seconds(60);
+        let mut called = false;
+        let out = get_or_fetch(
+            &dir,
+            "kc1",
+            Duration::seconds(0),
+            Utc::now(),
+            FetchPolicy::Closed { last_close },
+            || {
+                called = true;
+                Ok(vec![q(999.0, Utc::now())])
+            },
+        );
+        assert!(
+            !called,
+            "closed market with up-to-date cache must not fetch"
+        );
+        assert_eq!(out[0].price, Some(500.0));
+        assert_eq!(out[0].state, QuoteState::Fresh);
+    }
+
+    #[test]
+    fn closed_market_fetches_once_when_cache_predates_the_last_close() {
+        let dir = tempdir();
+        let t0 = Utc::now() - Duration::seconds(600);
+        let _ = get_or_fetch(
+            &dir,
+            "kc2",
+            Duration::seconds(60),
+            t0,
+            FetchPolicy::Normal,
+            || Ok(vec![q(500.0, t0)]),
+        );
+        // last_close is AFTER the cache (t0) -> cache predates the close -> fetch once.
+        let last_close = t0 + Duration::seconds(120);
+        let mut called = false;
+        let out = get_or_fetch(
+            &dir,
+            "kc2",
+            Duration::seconds(0),
+            Utc::now(),
+            FetchPolicy::Closed { last_close },
+            || {
+                called = true;
+                Ok(vec![q(777.0, Utc::now())])
+            },
+        );
+        assert!(called, "stale-vs-close cache must trigger one fetch");
+        assert_eq!(out[0].price, Some(777.0));
+    }
+
+    #[test]
+    fn closed_market_with_no_cache_fetches_once() {
+        let dir = tempdir();
+        let mut called = false;
+        let out = get_or_fetch(
+            &dir,
+            "kc3",
+            Duration::seconds(0),
+            Utc::now(),
+            FetchPolicy::Closed {
+                last_close: Utc::now(),
+            },
+            || {
+                called = true;
+                Ok(vec![q(1.0, Utc::now())])
+            },
+        );
+        assert!(called);
+        assert_eq!(out[0].price, Some(1.0));
     }
 }

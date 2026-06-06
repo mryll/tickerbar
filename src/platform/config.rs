@@ -56,10 +56,53 @@ impl Default for Display {
     }
 }
 
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct ProviderToggle {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct MarketHours {
+    /// Master switch for market-hours gating.
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    /// Per-provider overrides, keyed by provider name (e.g. "cnbc").
+    #[serde(default)]
+    pub providers: std::collections::HashMap<String, ProviderToggle>,
+}
+
+impl Default for MarketHours {
+    fn default() -> Self {
+        MarketHours {
+            enabled: true,
+            providers: std::collections::HashMap::new(),
+        }
+    }
+}
+
+impl MarketHours {
+    /// Whether gating applies to a given provider (master switch AND not disabled for it).
+    pub fn applies_to(&self, provider: &str) -> bool {
+        self.enabled
+            && self
+                .providers
+                .get(provider)
+                .map(|t| t.enabled)
+                .unwrap_or(true)
+    }
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct Config {
     #[serde(default)]
     pub display: Display,
+    #[serde(default)]
+    pub market_hours: MarketHours,
     #[serde(default, rename = "asset")]
     pub assets: Vec<Asset>,
 }

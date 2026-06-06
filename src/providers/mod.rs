@@ -10,8 +10,10 @@ use std::collections::BTreeMap;
 
 use chrono::{DateTime, Duration, Utc};
 
-use crate::platform::cache;
+use crate::platform::cache::{self, FetchPolicy};
+use crate::platform::config::MarketHours;
 use crate::platform::http::Http;
+use crate::platform::market::{self, Gate};
 use crate::platform::model::*;
 
 fn ttl(kind: ProviderKind) -> Duration {
@@ -83,7 +85,13 @@ fn assemble(
 }
 
 /// Fetch every configured asset, grouped by provider, each group through the cache.
-pub fn fetch_all(assets: &[Asset], http: &Http, now: DateTime<Utc>) -> Vec<Quote> {
+/// Closed markets (per `market`) are not re-fetched; their last close is served from cache.
+pub fn fetch_all(
+    assets: &[Asset],
+    http: &Http,
+    now: DateTime<Utc>,
+    market: &MarketHours,
+) -> Vec<Quote> {
     let dir = cache::cache_dir();
     let grouped = group_indexed(assets);
     let mut results: Vec<(Vec<usize>, Vec<Quote>)> = Vec::new();
@@ -91,7 +99,11 @@ pub fn fetch_all(assets: &[Asset], http: &Http, now: DateTime<Utc>) -> Vec<Quote
         let group: Vec<&Asset> = indices.iter().map(|i| &assets[*i]).collect();
         let key = build_key(kind, &group);
         let group_owned: Vec<Asset> = group.iter().map(|a| (*a).clone()).collect();
-        let quotes = cache::get_or_fetch(&dir, &key, ttl(kind), now, || {
+        let policy = match market::gate(kind, now, market) {
+            Gate::Open => FetchPolicy::Normal,
+            Gate::Closed { last_close } => FetchPolicy::Closed { last_close },
+        };
+        let quotes = cache::get_or_fetch(&dir, &key, ttl(kind), now, policy, || {
             let refs: Vec<&Asset> = group_owned.iter().collect();
             fetch_kind(kind, &refs, http, now)
         });

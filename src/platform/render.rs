@@ -2,8 +2,9 @@ use std::collections::HashMap;
 
 use chrono::{DateTime, Duration, Utc};
 
-use crate::platform::config::{Config, Display, DisplayMode};
+use crate::platform::config::{Config, Display, DisplayMode, MarketHours};
 use crate::platform::icons::IconSet;
+use crate::platform::market::{self, Gate};
 use crate::platform::model::{Asset, AssetSource, Direction, Panel, Quote, QuoteState};
 use crate::platform::theme::ThemeColors;
 use crate::platform::waybar::{self, WaybarOutput};
@@ -166,8 +167,26 @@ pub fn build(
     let epoch = now.timestamp().max(0) as u64;
     let vis = visible(quotes, &cfg.display, epoch);
     let text = bar_text(quotes, &cfg.display, epoch, colors);
-    let class = module_class(quotes, &vis);
-    let tooltip = build_tooltip(&cfg.assets, quotes, &cfg.display, colors, now);
+    let mut class = module_class(quotes, &vis);
+    // `closed` class when every asset currently on the bar is in a closed market.
+    let all_closed = !vis.is_empty()
+        && vis.iter().all(|q| {
+            matches!(
+                market::gate(q.source, now, &cfg.market_hours),
+                Gate::Closed { .. }
+            )
+        });
+    if all_closed {
+        class.push("closed".to_string());
+    }
+    let tooltip = build_tooltip(
+        &cfg.assets,
+        quotes,
+        &cfg.display,
+        &cfg.market_hours,
+        colors,
+        now,
+    );
     WaybarOutput {
         text,
         tooltip,
@@ -263,6 +282,7 @@ fn build_tooltip(
     assets: &[Asset],
     quotes: &[Quote],
     display: &Display,
+    market: &MarketHours,
     colors: &ThemeColors,
     now: DateTime<Utc>,
 ) -> String {
@@ -288,12 +308,20 @@ fn build_tooltip(
 
     // Distinct sources per group (config order), shown dim next to the section title.
     let mut group_sources: HashMap<TooltipGroup, Vec<&'static str>> = HashMap::new();
+    // A group is "closed" only when every source in it is currently closed.
+    let mut group_closed: HashMap<TooltipGroup, bool> = HashMap::new();
     for (a, q) in assets.iter().zip(quotes) {
-        let v = group_sources.entry(group_of(&a.source)).or_default();
+        let g = group_of(&a.source);
+        let v = group_sources.entry(g).or_default();
         let s = q.source.as_str();
         if !v.contains(&s) {
             v.push(s);
         }
+        let closed_now = matches!(market::gate(q.source, now, market), Gate::Closed { .. });
+        group_closed
+            .entry(g)
+            .and_modify(|c| *c = *c && closed_now)
+            .or_insert(closed_now);
     }
 
     // Flat list of structured lines, grouped by section in a fixed order.
@@ -336,9 +364,13 @@ fn build_tooltip(
 
     // Render each column to padded strings, then join side-by-side.
     let render_line = |l: &TooltipLine| match l {
-        TooltipLine::Header { group, continued } => {
-            render_header(*group, *continued, &group_sources, colors)
-        }
+        TooltipLine::Header { group, continued } => render_header(
+            *group,
+            *continued,
+            group_closed.get(group).copied().unwrap_or(false),
+            &group_sources,
+            colors,
+        ),
         TooltipLine::Row { text, .. } => text.clone(),
     };
     let col_strs: Vec<Vec<String>> = columns
@@ -395,6 +427,7 @@ fn build_tooltip(
 fn render_header(
     group: TooltipGroup,
     continued: bool,
+    closed: bool,
     sources: &HashMap<TooltipGroup, Vec<&'static str>>,
     colors: &ThemeColors,
 ) -> String {
@@ -409,12 +442,18 @@ fn render_header(
     } else {
         String::new()
     };
+    let closed_part = if closed {
+        waybar::fg(&colors.dim, "  \u{f04c} cerrado") // pause glyph
+    } else {
+        String::new()
+    };
     format!(
-        "  {} {}{}{}",
+        "  {} {}{}{}{}",
         waybar::fg(&colors.accent, group.glyph()),
         waybar::bold_fg(&colors.text, group.label()),
         src_part,
-        cont_part
+        cont_part,
+        closed_part
     )
 }
 
@@ -502,7 +541,7 @@ fn chunk_columns(lines: Vec<TooltipLine>, n: usize) -> Vec<Vec<TooltipLine>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::platform::config::{Display, DisplayMode};
+    use crate::platform::config::{Display, DisplayMode, MarketHours};
     use crate::platform::model::*;
     use chrono::Utc;
 
@@ -653,6 +692,7 @@ mod tests {
             &assets,
             &qs,
             &disp(DisplayMode::Fixed, 3),
+            &MarketHours::default(),
             &ThemeColors::default(),
             Utc::now(),
         );
@@ -746,7 +786,14 @@ mod tests {
             .collect();
         let mut d = disp(DisplayMode::Fixed, 3);
         d.tooltip_rows_per_column = 4; // force multiple columns
-        let tip = build_tooltip(&assets, &qs, &d, &ThemeColors::default(), Utc::now());
+        let tip = build_tooltip(
+            &assets,
+            &qs,
+            &d,
+            &MarketHours::default(),
+            &ThemeColors::default(),
+            Utc::now(),
+        );
         let widths: Vec<usize> = tip.lines().map(waybar::visible_len).collect();
         assert!(
             widths.windows(2).all(|w| w[0] == w[1]),

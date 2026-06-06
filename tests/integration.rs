@@ -60,7 +60,12 @@ fn stooq_degrades_gracefully_through_fetch_all() {
             symbol: "aapl.us".into(),
         },
     }];
-    let qs = providers::fetch_all(&assets, &http, Utc::now());
+    let qs = providers::fetch_all(
+        &assets,
+        &http,
+        Utc::now(),
+        &tickerbar::platform::config::MarketHours::default(),
+    );
     assert_eq!(qs.len(), 1);
     assert_eq!(qs[0].label, "AAPL");
 }

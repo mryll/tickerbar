@@ -55,7 +55,7 @@ fn run_to_json(cli: &Cli, colors: &ThemeColors) -> String {
         Ok(cfg) => {
             let http = Http::new(cli.timeout);
             let now = chrono::Utc::now();
-            let quotes = providers::fetch_all(&cfg.assets, &http, now);
+            let quotes = providers::fetch_all(&cfg.assets, &http, now, &cfg.market_hours);
             to_json(render::build(&cfg, &quotes, now, colors))
         }
         Err(msg) => fallback_json(&msg, colors),

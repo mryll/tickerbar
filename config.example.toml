@@ -14,7 +14,7 @@ bar_format = "{glyph} {label} {price} {arrow}{change_pct}"
 tooltip_rows_per_column = 0   # wrap the tooltip into a new column every N lines (0 = single)
 
 # Don't poll a market while it's closed (built-in calendars: crypto 24/7, BYMA, US, forex).
-# Closed panels show "⏸ cerrado" in the tooltip and serve the last close from cache.
+# Closed panels show "⏸ closed" in the tooltip and serve the last close from cache.
 [market_hours]
 enabled = true
 # Disable gating for a single provider (e.g. if you track a non-US stock via cnbc/finnhub):

@@ -227,10 +227,10 @@ impl TooltipGroup {
         match self {
             TooltipGroup::Crypto => "Crypto",
             TooltipGroup::FiatArs => "Fiat · ARS",
-            TooltipGroup::AccionesAr => "Acciones AR",
-            TooltipGroup::Bonos => "Bonos",
+            TooltipGroup::AccionesAr => "AR Stocks",
+            TooltipGroup::Bonos => "AR Bonds",
             TooltipGroup::Cedears => "CEDEARs",
-            TooltipGroup::On => "ON",
+            TooltipGroup::On => "Corp Bonds",
             TooltipGroup::Stocks => "Stocks",
             TooltipGroup::Forex => "Forex",
         }
@@ -443,7 +443,7 @@ fn render_header(
         String::new()
     };
     let closed_part = if closed {
-        waybar::fg(&colors.dim, "  \u{f04c} cerrado") // pause glyph
+        waybar::fg(&colors.dim, "  \u{f04c} closed") // pause glyph
     } else {
         String::new()
     };

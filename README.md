@@ -22,7 +22,7 @@ A price ticker widget for [Waybar](https://github.com/Alexays/Waybar): crypto, t
 - Stocks/indices with no key via CNBC (`AAPL`, `.SPX`); optional Finnhub with a free key
 - Argentine market (BYMA) with no key via data912 — acciones, bonos, CEDEARs, ONs (in ARS)
 - Multi-column tooltip (`tooltip_rows_per_column`) so large watchlists wrap instead of growing tall
-- Market-hours aware: closed markets aren't polled (built-in calendars) and show `⏸ cerrado`
+- Market-hours aware: closed markets aren't polled (built-in calendars) and show `⏸ closed`
 - Compact bar with a configurable format, or opt-in rotating "ticker-tape" mode
 - Per-provider caching with TTLs and rate-limit (HTTP 429) backoff
 - CSS classes for bar styling: lifecycle (`ok`/`partial`/`stale`/`error`) + direction (`up`/`down`/`flat`/`mixed`)
@@ -114,7 +114,7 @@ quote = "usd"
 ### Market hours
 
 By default tickerbar does **not** poll a market while it's closed — it serves the last close
-from cache and marks the panel `⏸ cerrado` in the tooltip. Built-in calendars (timezone- and
+from cache and marks the panel `⏸ closed` in the tooltip. Built-in calendars (timezone- and
 DST-aware via `chrono-tz`): crypto 24/7; BYMA (data912) Mon–Fri 10:30–17:00 ART; US stocks
 (cnbc/finnhub/stooq) Mon–Fri 09:30–16:00 ET; ECB forex (frankfurter) weekdays.
 

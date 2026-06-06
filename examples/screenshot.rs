@@ -88,6 +88,31 @@ fn ar(label: &str, panel: Panel, price: f64, chg: f64) -> (Asset, Quote) {
     )
 }
 
+fn com(label: &str, sym: &str, price: f64, chg: f64) -> (Asset, Quote) {
+    pair(
+        label,
+        AssetSource::Commodity { symbol: sym.into() },
+        price,
+        Some(chg),
+    )
+}
+fn idx(label: &str, sym: &str, price: f64, chg: f64) -> (Asset, Quote) {
+    pair(
+        label,
+        AssetSource::Index { symbol: sym.into() },
+        price,
+        Some(chg),
+    )
+}
+fn rate(label: &str, sym: &str, price: f64, chg: f64) -> (Asset, Quote) {
+    pair(
+        label,
+        AssetSource::Rate { symbol: sym.into() },
+        price,
+        Some(chg),
+    )
+}
+
 fn build_output(
     pairs: Vec<(Asset, Quote)>,
     display: Display,
@@ -111,12 +136,14 @@ fn render_tooltip(pairs: Vec<(Asset, Quote)>, display: Display) -> String {
 }
 
 fn simple() -> String {
+    // One of each asset class — the breadth in a single column.
     let pairs = vec![
         cg("BTC", "bitcoin", 68_000.50, 1.23),
         cg("ETH", "ethereum", 3_205.80, -0.45),
         us("AAPL", "AAPL", 232.10, 0.88),
-        us("TSLA", "TSLA", 261.40, -2.11),
-        us("S&P 500", ".SPX", 5_588.20, 0.32),
+        idx("S&P 500", "sp500", 5_588.20, 0.32),
+        com("Gold", "gold", 2_412.30, 0.74),
+        rate("US 10Y", "us10y", 4.53, 1.23),
         fx("EUR/USD", "eur", 1.0852, -0.12),
     ];
     let display = Display {
@@ -131,35 +158,35 @@ fn full() -> String {
         cg("BTC", "bitcoin", 68_000.50, 1.23),
         cg("ETH", "ethereum", 3_205.80, -0.45),
         cg("SOL", "solana", 168.22, 4.10),
-        cg("BNB", "binancecoin", 602.10, -1.02),
         cg("XRP", "ripple", 0.5821, 2.31),
         cg("ADA", "cardano", 0.4410, -0.88),
         cg("DOGE", "dogecoin", 0.1623, 5.66),
-        cg("DOT", "polkadot", 6.84, -2.40),
         us("AAPL", "AAPL", 232.10, 0.88),
         us("MSFT", "MSFT", 428.90, 0.41),
         us("NVDA", "NVDA", 121.40, 3.92),
         us("TSLA", "TSLA", 261.40, -2.11),
         us("AMZN", "AMZN", 186.55, 1.04),
-        us("GOOGL", "GOOGL", 178.20, -0.63),
-        us("META", "META", 503.70, 1.77),
-        us("NFLX", "NFLX", 678.30, -1.20),
-        us("S&P 500", ".SPX", 5_588.20, 0.32),
-        us("Nasdaq", ".IXIC", 18_240.10, 0.55),
-        us("Dow", ".DJI", 39_120.40, -0.18),
-        cg("LTC", "litecoin", 84.20, 1.51),
-        cg("LINK", "chainlink", 14.07, -1.88),
+        idx("S&P 500", "sp500", 5_588.20, 0.32),
+        idx("Nasdaq", "nasdaq", 18_240.10, 0.55),
+        idx("Dow", "dow", 39_120.40, -0.18),
+        idx("VIX", "vix", 13.20, -4.80),
+        com("Gold", "gold", 2_412.30, 0.74),
+        com("Silver", "silver", 31.55, 1.20),
+        com("WTI Crude", "wti", 78.40, -1.36),
+        com("Nat Gas", "natgas", 2.78, 2.04),
+        com("Copper", "copper", 4.55, -0.42),
+        rate("US 2Y", "us2y", 4.71, -0.30),
+        rate("US 10Y", "us10y", 4.53, 1.23),
+        rate("US 30Y", "us30y", 4.66, 0.88),
         fx("EUR/USD", "eur", 1.0852, -0.12),
-        fx("GBP/USD", "gbp", 1.2740, 0.22),
         fx("USD/JPY", "usd", 157.30, 0.34),
-        fx("AUD/USD", "aud", 0.6645, -0.41),
+        fx("GBP/USD", "gbp", 1.2740, 0.22),
         // A small taste of the Argentine-market support (full BYMA in the README).
         dolar("Blue", "blue", 1_030.0),
-        dolar("MEP", "bolsa", 1_061.4),
         ar("ALUA", Panel::Acciones, 973.0, -3.56),
     ];
     let display = Display {
-        tooltip_rows_per_column: 12,
+        tooltip_rows_per_column: 13,
         tooltip_max_columns: 0,
         ..Display::default()
     };

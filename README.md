@@ -159,6 +159,14 @@ enabled = false                # disable gating for one provider (e.g. a non-US 
 > track a non-US instrument through them. Exchange **holidays are not** accounted for — only
 > weekly session hours.
 
+## Theming (Omarchy)
+
+Tooltip and bar colors are read from the active [Omarchy](https://omarchy.org) theme at `~/.config/omarchy/current/theme/colors.toml` on every run — the accent, the up/down green/red, and the foreground/background all follow your theme (light themes included). On non-Omarchy systems a built-in dark palette is used as a fallback.
+
+| Gruvbox | Catppuccin Latte | Everforest |
+|:---:|:---:|:---:|
+| ![Gruvbox](screenshots/theme-gruvbox.png) | ![Catppuccin Latte](screenshots/theme-catppuccin-latte.png) | ![Everforest](screenshots/theme-everforest.png) |
+
 ## Waybar integration
 
 Add a custom module to `~/.config/waybar/config`:

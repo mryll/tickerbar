@@ -5,8 +5,11 @@
 
 A multi-market price ticker for [Waybar](https://github.com/Alexays/Waybar): crypto, stocks & indices, forex, and fiat currencies in one module — with **no API key**.
 
+![tickerbar in Waybar](screenshots/bar.png)
+
 <p align="center">
-  <img src="screenshots/tooltip-simple.png" alt="tickerbar tooltip" width="380">
+  <em>A compact line in your bar — hover for the full, color-coded table:</em><br><br>
+  <img src="screenshots/tooltip-simple.png" alt="tickerbar tooltip" width="360">
 </p>
 
 ## Why tickerbar?

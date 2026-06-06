@@ -81,7 +81,7 @@ fn ar(label: &str, panel: Panel, price: f64, chg: f64) -> (Asset, Quote) {
     )
 }
 
-fn render_tooltip(pairs: Vec<(Asset, Quote)>, display: Display) -> String {
+fn build_output(pairs: Vec<(Asset, Quote)>, display: Display) -> tickerbar::platform::waybar::WaybarOutput {
     let (assets, quotes): (Vec<Asset>, Vec<Quote>) = pairs.into_iter().unzip();
     let cfg = Config {
         display,
@@ -93,7 +93,11 @@ fn render_tooltip(pairs: Vec<(Asset, Quote)>, display: Display) -> String {
         assets,
     };
     let colors = ThemeColors::load();
-    render::build(&cfg, &quotes, Utc::now(), &colors).tooltip
+    render::build(&cfg, &quotes, Utc::now(), &colors)
+}
+
+fn render_tooltip(pairs: Vec<(Asset, Quote)>, display: Display) -> String {
+    build_output(pairs, display).tooltip
 }
 
 fn simple() -> String {
@@ -152,10 +156,27 @@ fn full() -> String {
     render_tooltip(pairs, display)
 }
 
+fn bar() -> String {
+    // The compact in-bar line (the `text` field), a few assets shown inline.
+    let pairs = vec![
+        cg("BTC", "bitcoin", 68_000.50, 1.23),
+        cg("ETH", "ethereum", 3_205.80, -0.45),
+        us("AAPL", "AAPL", 232.10, 0.88),
+        us("S&P 500", ".SPX", 5_588.20, 0.32),
+        fx("EUR/USD", "eur", 1.0852, -0.12),
+    ];
+    let display = Display {
+        max_on_bar: 5,
+        ..Display::default()
+    };
+    build_output(pairs, display).text
+}
+
 fn main() {
     let which = std::env::args().nth(1).unwrap_or_else(|| "simple".into());
     let out = match which.as_str() {
         "full" => full(),
+        "bar" => bar(),
         _ => simple(),
     };
     println!("{out}");

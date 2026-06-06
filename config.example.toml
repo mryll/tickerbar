@@ -1,12 +1,8 @@
 # tickerbar config — copy to ~/.config/tickerbar/config.toml
 #
-# The crypto / Argentine-dollar / forex providers below work with NO API key.
-#
-# STOCKS: there is currently no reliable no-key stock source. Stooq is best-effort and is
-# often behind an anti-bot wall (quotes then show as "n/d"). For reliable stock/index
-# quotes, use the `finnhub` provider with a free API key exported as FINNHUB_TOKEN
-# (https://finnhub.io, free tier ~60 req/min). Both stock options are shown commented out
-# at the bottom. tickerbar is NOT a live trading feed.
+# Every provider below works with NO API key, including stocks/indices (CNBC).
+# Stock symbols: plain tickers (AAPL, MSFT); indices use a leading dot (.SPX, .IXIC, .DJI).
+# tickerbar is NOT a live trading feed — quotes are delayed/best-effort.
 
 [display]
 mode = "fixed"          # "fixed" | "rotate"
@@ -52,21 +48,27 @@ provider = "frankfurter"
 base = "eur"
 quote = "usd"
 
-# ----- Stocks / indices (opt-in) -------------------------------------------------------
-# Option A — Stooq, no key, best-effort (often blocked → shows "n/d"):
+# Stocks / indices via CNBC — no API key.
+[[asset]]
+label = "AAPL"
+provider = "cnbc"
+symbol = "AAPL"
+
+[[asset]]
+label = "S&P500"
+provider = "cnbc"
+symbol = ".SPX"
+
+# ----- Other stock providers (opt-in) --------------------------------------------------
+# Finnhub — reliable, needs a free key exported as FINNHUB_TOKEN (token sent via header):
+#   export FINNHUB_TOKEN=your_free_token
 # [[asset]]
-# label = "AAPL"
+# label = "MSFT"
+# provider = "finnhub"
+# symbol = "MSFT"
+#
+# Stooq — no key, but often behind an anti-bot wall (then shows "n/d"):
+# [[asset]]
+# label = "TSLA"
 # provider = "stooq"
-# symbol = "aapl.us"
-#
-# Option B — Finnhub, reliable, free key required. Export the token first:
-#   export FINNHUB_TOKEN=your_free_token   # in your shell / Waybar environment
-# [[asset]]
-# label = "AAPL"
-# provider = "finnhub"
-# symbol = "AAPL"
-#
-# [[asset]]
-# label = "S&P500"
-# provider = "finnhub"
-# symbol = "^GSPC"
+# symbol = "tsla.us"

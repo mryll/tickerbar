@@ -37,6 +37,7 @@ pub enum ProviderKind {
     Stooq,
     Frankfurter,
     Finnhub,
+    Cnbc,
 }
 
 impl ProviderKind {
@@ -47,6 +48,7 @@ impl ProviderKind {
             ProviderKind::Stooq => "stooq",
             ProviderKind::Frankfurter => "frankfurter",
             ProviderKind::Finnhub => "finnhub",
+            ProviderKind::Cnbc => "cnbc",
         }
     }
 }
@@ -85,6 +87,9 @@ pub enum AssetSource {
     Finnhub {
         symbol: String,
     },
+    Cnbc {
+        symbol: String,
+    },
 }
 
 impl AssetSource {
@@ -95,6 +100,7 @@ impl AssetSource {
             AssetSource::Stooq { .. } => ProviderKind::Stooq,
             AssetSource::Frankfurter { .. } => ProviderKind::Frankfurter,
             AssetSource::Finnhub { .. } => ProviderKind::Finnhub,
+            AssetSource::Cnbc { .. } => ProviderKind::Cnbc,
         }
     }
 
@@ -106,6 +112,7 @@ impl AssetSource {
             AssetSource::Stooq { symbol } => format!("st:{symbol}"),
             AssetSource::Frankfurter { base, quote } => format!("fx:{base}:{quote}"),
             AssetSource::Finnhub { symbol } => format!("fh:{symbol}"),
+            AssetSource::Cnbc { symbol } => format!("cb:{symbol}"),
         }
     }
 }

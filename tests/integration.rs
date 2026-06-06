@@ -5,7 +5,7 @@
 use chrono::Utc;
 use tickerbar::platform::http::Http;
 use tickerbar::platform::model::*;
-use tickerbar::providers::{self, coingecko, dolarapi, frankfurter};
+use tickerbar::providers::{self, cnbc, coingecko, dolarapi, frankfurter};
 
 #[test]
 fn coingecko_returns_a_positive_btc_usd_price() {
@@ -63,6 +63,19 @@ fn stooq_degrades_gracefully_through_fetch_all() {
     let qs = providers::fetch_all(&assets, &http, Utc::now());
     assert_eq!(qs.len(), 1);
     assert_eq!(qs[0].label, "AAPL");
+}
+
+#[test]
+fn cnbc_returns_a_positive_aapl_price_without_a_key() {
+    let http = Http::new(8);
+    let a = Asset {
+        label: "AAPL".into(),
+        source: AssetSource::Cnbc {
+            symbol: "AAPL".into(),
+        },
+    };
+    let qs = cnbc::fetch(&[&a], &http, Utc::now()).expect("cnbc fetch");
+    assert!(qs[0].price.unwrap_or(0.0) > 0.0);
 }
 
 #[test]

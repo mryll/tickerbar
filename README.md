@@ -19,7 +19,7 @@ A price ticker widget for [Waybar](https://github.com/Alexays/Waybar): crypto, t
 - Crypto prices with 24h change (CoinGecko) — pick the quote currency per asset (`usd`, `ars`, …)
 - Argentine dollar: oficial, blue, MEP/bolsa, CCL, etc. (DolarAPI), buy/sell/mid side
 - Forex pairs (Frankfurter v2)
-- Optional stocks/indices (see the note below)
+- Stocks/indices with no key via CNBC (`AAPL`, `.SPX`); optional Finnhub with a free key
 - Compact bar with a configurable format, or opt-in rotating "ticker-tape" mode
 - Per-provider caching with TTLs and rate-limit (HTTP 429) backoff
 - CSS classes for bar styling: lifecycle (`ok`/`partial`/`stale`/`error`) + direction (`up`/`down`/`flat`/`mixed`)
@@ -93,17 +93,16 @@ quote = "usd"
 | `coingecko` | Crypto | No | `id` + `quote` (vs_currency). 24h change included. |
 | `dolarapi` | Argentine peso | No | `casa` + `side`. Uses the provider's own update timestamp. |
 | `frankfurter` | Forex | No | `base` + `quote`. Reference rates (daily). |
-| `stooq` | Stocks/indices | No | `symbol` (e.g. `aapl.us`). Best-effort — see below. |
-| `finnhub` | Stocks/indices | Yes (free) | `symbol`. Reliable. Token via `FINNHUB_TOKEN` env var. |
+| `cnbc` | Stocks/indices | No | `symbol` — plain ticker (`AAPL`) or index with a leading dot (`.SPX`, `.IXIC`, `.DJI`). |
+| `finnhub` | Stocks/indices | Yes (free) | `symbol`. Token via `FINNHUB_TOKEN` env var. |
+| `stooq` | Stocks/indices | No | `symbol` (e.g. `aapl.us`). Best-effort; often anti-bot-walled → `n/d`. |
 
-> [!IMPORTANT]
-> **Stocks are not no-key in practice.** There is currently no reliable key-free stock source: Stooq is frequently behind an anti-bot wall (its quotes then show as `n/d`), and Yahoo's endpoint rate-limits and forbids redistribution. For dependable stock/index quotes use the `finnhub` provider with a free key:
+> [!NOTE]
+> **Stocks/indices work with no key via `cnbc`** (CNBC's public quote endpoint, batched). It's an unofficial endpoint, so treat it as delayed/best-effort — tickerbar is **not** a live trading feed. If you want a documented/keyed source instead, use `finnhub` with a free key:
 >
 > ```bash
-> export FINNHUB_TOKEN=your_free_token   # from https://finnhub.io
+> export FINNHUB_TOKEN=your_free_token   # from https://finnhub.io; sent as a header, never in a URL
 > ```
->
-> The token is sent as a request header, never placed in a URL. tickerbar is **not** a live trading feed — quotes are delayed/best-effort.
 
 > [!NOTE]
 > `BTC/ARS` via CoinGecko uses CoinGecko's market ARS (≈ official), **not** the blue dollar. Pricing crypto at the blue rate (cross-conversion) is intentionally not done in this version.

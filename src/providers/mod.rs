@@ -1,3 +1,4 @@
+pub mod cnbc;
 pub mod coingecko;
 pub mod dolarapi;
 pub mod finnhub;
@@ -19,6 +20,7 @@ fn ttl(kind: ProviderKind) -> Duration {
         ProviderKind::Stooq => Duration::seconds(600),
         ProviderKind::Frankfurter => Duration::seconds(3600),
         ProviderKind::Finnhub => Duration::seconds(60),
+        ProviderKind::Cnbc => Duration::seconds(120),
     }
 }
 
@@ -34,6 +36,7 @@ fn fetch_kind(
         ProviderKind::Stooq => stooq::fetch(assets, http, now),
         ProviderKind::Frankfurter => frankfurter::fetch(assets, http, now),
         ProviderKind::Finnhub => finnhub::fetch(assets, http, now),
+        ProviderKind::Cnbc => cnbc::fetch(assets, http, now),
     }
 }
 

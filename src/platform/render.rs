@@ -77,6 +77,7 @@ fn group_title(k: ProviderKind) -> &'static str {
         ProviderKind::Stooq => "Stocks",
         ProviderKind::Frankfurter => "Forex",
         ProviderKind::Finnhub => "Stocks",
+        ProviderKind::Cnbc => "Stocks",
     }
 }
 
@@ -249,6 +250,7 @@ fn build_tooltip(
         ProviderKind::DolarApi,
         ProviderKind::Stooq,
         ProviderKind::Finnhub,
+        ProviderKind::Cnbc,
         ProviderKind::Frankfurter,
     ];
     let sources: Vec<&str> = footer_order

@@ -40,11 +40,13 @@ impl IconSet {
             (IconSet::Emoji, ProviderKind::Stooq) => "📊",
             (IconSet::Emoji, ProviderKind::Frankfurter) => "💱",
             (IconSet::Emoji, ProviderKind::Finnhub) => "📊",
+            (IconSet::Emoji, ProviderKind::Cnbc) => "📊",
             (_, ProviderKind::CoinGecko) => "\u{f15a}", // nf-fa-bitcoin
             (_, ProviderKind::DolarApi) => "\u{f155}",  // nf-fa-dollar
             (_, ProviderKind::Stooq) => "\u{f201}",     // nf-fa-line_chart
             (_, ProviderKind::Frankfurter) => "\u{f0ec}", // nf-fa-exchange
             (_, ProviderKind::Finnhub) => "\u{f201}",   // nf-fa-line_chart
+            (_, ProviderKind::Cnbc) => "\u{f201}",      // nf-fa-line_chart
         }
     }
 }

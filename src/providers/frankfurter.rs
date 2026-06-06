@@ -85,6 +85,8 @@ fn parse_base(
                     change_pct: None,
                     change_abs: None,
                     direction: None,
+                    day_high: None,
+                    day_low: None,
                     source: ProviderKind::Frankfurter,
                     as_of,
                     fetched_at: now,

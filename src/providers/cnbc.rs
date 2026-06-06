@@ -25,6 +25,8 @@ struct Row {
     last: Option<String>,
     change: Option<String>,
     change_pct: Option<String>,
+    high: Option<String>,
+    low: Option<String>,
     #[serde(rename = "currencyCode")]
     currency: Option<String>,
 }
@@ -144,6 +146,8 @@ fn parse(body: &str, assets: &[&Asset], now: DateTime<Utc>) -> Result<Vec<Quote>
                         .and_then(|r| r.change_pct.as_deref())
                         .and_then(parse_pct);
                     let change_abs = row.and_then(|r| r.change.as_deref()).and_then(parse_pct);
+                    let day_high = row.and_then(|r| r.high.as_deref()).and_then(parse_amount);
+                    let day_low = row.and_then(|r| r.low.as_deref()).and_then(parse_amount);
                     let quote = row
                         .and_then(|r| r.currency.as_deref())
                         .unwrap_or("usd")
@@ -157,6 +161,8 @@ fn parse(body: &str, assets: &[&Asset], now: DateTime<Utc>) -> Result<Vec<Quote>
                         change_pct,
                         change_abs,
                         direction: change_pct.map(Direction::from_change),
+                        day_high,
+                        day_low,
                         source: ProviderKind::Cnbc,
                         as_of: None,
                         fetched_at: now,
@@ -288,5 +294,25 @@ mod tests {
         let refs: Vec<&Asset> = assets.iter().collect();
         let qs = parse(body, &refs, Utc::now()).unwrap();
         assert_eq!(qs[0].price, Some(21.51));
+    }
+
+    #[test]
+    fn a_commodity_quote_carries_the_intraday_range() {
+        let body = include_str!("../../tests/fixtures/cnbc_classes.json");
+        let assets = [commodity("gold")];
+        let refs: Vec<&Asset> = assets.iter().collect();
+        let qs = parse(body, &refs, Utc::now()).unwrap();
+        assert_eq!(qs[0].day_high, Some(4508.70));
+        assert_eq!(qs[0].day_low, Some(4336.60));
+    }
+
+    #[test]
+    fn a_yield_range_also_strips_the_percent() {
+        let body = include_str!("../../tests/fixtures/cnbc_classes.json");
+        let assets = [rate("us10y")];
+        let refs: Vec<&Asset> = assets.iter().collect();
+        let qs = parse(body, &refs, Utc::now()).unwrap();
+        assert_eq!(qs[0].day_high, Some(4.554));
+        assert_eq!(qs[0].day_low, Some(4.457));
     }
 }

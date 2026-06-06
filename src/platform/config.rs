@@ -32,6 +32,10 @@ pub struct Display {
     /// 0 = unlimited (single band). Useful for narrow / vertical monitors.
     #[serde(default)]
     pub tooltip_max_columns: usize,
+    /// Append a dim intraday low–high range to each tooltip row, where the provider supplies it
+    /// (currently CNBC-backed assets). Off by default to keep the tooltip compact.
+    #[serde(default)]
+    pub tooltip_range: bool,
 }
 
 fn default_rotate_interval() -> u64 {
@@ -57,6 +61,7 @@ impl Default for Display {
             bar_format: default_bar_format(),
             tooltip_rows_per_column: 0,
             tooltip_max_columns: 0,
+            tooltip_range: false,
         }
     }
 }

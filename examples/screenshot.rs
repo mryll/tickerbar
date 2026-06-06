@@ -25,6 +25,8 @@ fn pair(label: &str, source: AssetSource, price: f64, chg: Option<f64>) -> (Asse
         change_pct: chg,
         change_abs: None,
         direction: chg.map(Direction::from_change),
+        day_high: None,
+        day_low: None,
         source: kind,
         as_of: None,
         fetched_at: Utc::now(),

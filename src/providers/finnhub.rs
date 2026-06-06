@@ -61,6 +61,8 @@ fn parse_one(asset: &Asset, symbol: &str, v: &Value, now: DateTime<Utc>) -> Quot
             change_pct,
             change_abs,
             direction: change_pct.map(Direction::from_change),
+            day_high: None,
+            day_low: None,
             source: ProviderKind::Finnhub,
             as_of: epoch
                 .filter(|&t| t > 0)

@@ -46,6 +46,8 @@ fn mk_quote(
             change_pct: pct,
             change_abs: None,
             direction: pct.map(Direction::from_change),
+            day_high: None,
+            day_low: None,
             source: ProviderKind::Data912,
             as_of: None,
             fetched_at: now,

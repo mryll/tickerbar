@@ -66,6 +66,8 @@ fn parse(body: &str, assets: &[&Asset], now: DateTime<Utc>) -> Result<Vec<Quote>
                     change_pct: None,
                     change_abs: None,
                     direction: None,
+                    day_high: None,
+                    day_low: None,
                     source: ProviderKind::Stooq,
                     as_of: None,
                     fetched_at: now,

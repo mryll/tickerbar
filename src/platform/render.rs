@@ -381,6 +381,11 @@ fn build_tooltip(
         .map(|q| waybar::visible_len(&fmt_change(q.change_pct)))
         .max()
         .unwrap_or(0);
+    let widths = ColWidths {
+        label: label_w,
+        price: price_w,
+        change: change_w,
+    };
 
     // Distinct sources per group (config order), shown dim next to the section title.
     let mut group_sources: HashMap<TooltipGroup, Vec<&'static str>> = HashMap::new();
@@ -419,7 +424,7 @@ fn build_tooltip(
         for q in members {
             lines.push(TooltipLine::Row {
                 group,
-                text: render_row(q, group, label_w, price_w, change_w, now, colors),
+                text: render_row(q, group, display.tooltip_range, &widths, now, colors),
             });
         }
     }
@@ -563,12 +568,18 @@ fn render_header(
     )
 }
 
+/// Shared inner-column widths, computed once across all quotes so every row is uniform.
+struct ColWidths {
+    label: usize,
+    price: usize,
+    change: usize,
+}
+
 fn render_row(
     q: &Quote,
     group: TooltipGroup,
-    label_w: usize,
-    price_w: usize,
-    change_w: usize,
+    show_range: bool,
+    w: &ColWidths,
     now: DateTime<Utc>,
     colors: &ThemeColors,
 ) -> String {
@@ -579,16 +590,30 @@ fn render_row(
     };
     let label = pad_right(
         &waybar::bold_fg(&colors.text, &waybar::pango_escape(&q.label)),
-        label_w,
+        w.label,
     );
-    let price = pad_left(&waybar::fg(dir_color, &fmt_value(q.price, group)), price_w);
+    let price = pad_left(&waybar::fg(dir_color, &fmt_value(q.price, group)), w.price);
     let change_plain = fmt_change(q.change_pct);
     let change = if change_plain.is_empty() {
-        pad_left("", change_w)
+        pad_left("", w.change)
     } else {
-        pad_left(&waybar::fg(dir_color, &change_plain), change_w)
+        pad_left(&waybar::fg(dir_color, &change_plain), w.change)
     };
-    let note = match q.state {
+    // Dim suffix in the note area (not a measured column): optional intraday range, then state.
+    let mut note = String::new();
+    if show_range {
+        if let (Some(lo), Some(hi)) = (q.day_low, q.day_high) {
+            note.push_str(&waybar::fg(
+                &colors.dim,
+                &format!(
+                    "  {}-{}",
+                    fmt_value(Some(lo), group),
+                    fmt_value(Some(hi), group)
+                ),
+            ));
+        }
+    }
+    note.push_str(&match q.state {
         QuoteState::Stale => waybar::fg(
             &colors.dim,
             &format!(
@@ -598,7 +623,7 @@ fn render_row(
         ),
         QuoteState::Missing | QuoteState::Error => waybar::fg(&colors.dim, "  (n/d)"),
         QuoteState::Fresh => String::new(),
-    };
+    });
     format!("    {}  {}  {}{}", label, price, change, note)
 }
 
@@ -662,6 +687,8 @@ mod tests {
             change_pct: dir.map(|_| 1.0),
             change_abs: None,
             direction: dir,
+            day_high: None,
+            day_low: None,
             source: ProviderKind::CoinGecko,
             as_of: None,
             fetched_at: Utc::now(),
@@ -678,6 +705,7 @@ mod tests {
             bar_format: "{label} {price} {arrow}".into(),
             tooltip_rows_per_column: 0,
             tooltip_max_columns: 0,
+            tooltip_range: false,
         }
     }
 
@@ -714,6 +742,50 @@ mod tests {
             fmt_value(Some(4353.9), TooltipGroup::Commodities),
             "4,353.90"
         );
+    }
+
+    #[test]
+    fn the_intraday_range_is_appended_only_when_enabled() {
+        let mut q = quote(
+            "GOLD",
+            Some(4400.0),
+            Some(Direction::Down),
+            QuoteState::Fresh,
+        );
+        q.day_low = Some(4336.6);
+        q.day_high = Some(4508.7);
+        let now = Utc::now();
+        let colors = ThemeColors::default();
+        let w = ColWidths {
+            label: 6,
+            price: 10,
+            change: 8,
+        };
+        let off = render_row(&q, TooltipGroup::Commodities, false, &w, now, &colors);
+        let on = render_row(&q, TooltipGroup::Commodities, true, &w, now, &colors);
+        assert!(!off.contains("4,336.60"));
+        assert!(on.contains("4,336.60-4,508.70"));
+    }
+
+    #[test]
+    fn a_rate_range_renders_as_percents() {
+        let mut q = quote("US10Y", Some(4.53), Some(Direction::Up), QuoteState::Fresh);
+        q.day_low = Some(4.457);
+        q.day_high = Some(4.554);
+        let w = ColWidths {
+            label: 6,
+            price: 8,
+            change: 8,
+        };
+        let on = render_row(
+            &q,
+            TooltipGroup::Rates,
+            true,
+            &w,
+            Utc::now(),
+            &ThemeColors::default(),
+        );
+        assert!(on.contains("4.46%-4.55%"));
     }
 
     /// Generic (non-rate) assets aligned 1:1 with quotes, for bar-rendering tests.

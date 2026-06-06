@@ -62,6 +62,8 @@ fn parse(body: &str, assets: &[&Asset], now: DateTime<Utc>) -> Result<Vec<Quote>
                     change_pct: change,
                     change_abs: None,
                     direction: change.map(Direction::from_change),
+                    day_high: None,
+                    day_low: None,
                     source: ProviderKind::CoinGecko,
                     as_of,
                     fetched_at: now,

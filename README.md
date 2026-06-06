@@ -33,6 +33,7 @@ The tooltip groups your watchlist by asset class and wraps into columns as it gr
 - Commodities, indices & Treasury yields with no key via friendly aliases (`gold`, `wti`, `vix`, `us10y`) — yields render as a percent
 - Argentine market (BYMA) with no key via data912 — acciones, bonos, CEDEARs, ONs (in ARS)
 - Multi-column tooltip (`tooltip_rows_per_column`) so large watchlists wrap instead of growing tall, with a column cap (`tooltip_max_columns`) that stacks extra columns into bands below — fits narrow/vertical monitors
+- Optional intraday low–high range per row (`tooltip_range`) for CNBC-backed assets (stocks, indices, commodities, rates)
 - Market-hours aware: closed markets aren't polled (built-in calendars) and show `⏸ closed`
 - Compact bar with a configurable format, or opt-in rotating "ticker-tape" mode
 - Per-provider caching with TTLs and rate-limit (HTTP 429) backoff

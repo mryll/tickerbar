@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::platform::model::{FetchError, Quote, QuoteState};
 
-pub const SCHEMA_VERSION: u32 = 1;
+pub const SCHEMA_VERSION: u32 = 2;
 
 /// How `get_or_fetch` should treat the cache for this call.
 pub enum FetchPolicy {
@@ -214,6 +214,8 @@ mod tests {
             change_pct: Some(1.0),
             change_abs: None,
             direction: Some(Direction::Up),
+            day_high: None,
+            day_low: None,
             source: ProviderKind::CoinGecko,
             as_of: None,
             fetched_at: now,

@@ -192,6 +192,9 @@ pub struct Quote {
     pub change_pct: Option<f64>,
     pub change_abs: Option<f64>,
     pub direction: Option<Direction>,
+    /// Intraday range, when the provider supplies it (currently CNBC only). Same unit as `price`.
+    pub day_high: Option<f64>,
+    pub day_low: Option<f64>,
     pub source: ProviderKind,
     pub as_of: Option<DateTime<Utc>>,
     pub fetched_at: DateTime<Utc>,
@@ -210,6 +213,8 @@ impl Quote {
             change_pct: None,
             change_abs: None,
             direction: None,
+            day_high: None,
+            day_low: None,
             source: asset.source.kind(),
             as_of: None,
             fetched_at: now,

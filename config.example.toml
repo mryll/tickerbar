@@ -13,6 +13,7 @@ icons = "nerd"          # "nerd" | "emoji" | "ascii"
 bar_format = "{glyph} {label} {price} {arrow}{change_pct}"
 tooltip_rows_per_column = 0   # wrap the tooltip into a new column every N lines (0 = single)
 tooltip_max_columns = 0       # cap columns side-by-side; extras wrap into a band below (0 = unlimited)
+tooltip_range = false         # append a dim intraday low–high range per row (CNBC-backed assets)
 
 # Don't poll a market while it's closed (built-in calendars: crypto 24/7, BYMA, US, forex).
 # Closed panels show "⏸ closed" in the tooltip and serve the last close from cache.

@@ -5,6 +5,7 @@ use clap::Parser;
 
 use tickerbar::platform::config::Config;
 use tickerbar::platform::http::Http;
+use tickerbar::platform::presets;
 use tickerbar::platform::render;
 use tickerbar::platform::theme::ThemeColors;
 use tickerbar::platform::waybar::{self, WaybarOutput};
@@ -29,6 +30,16 @@ struct Cli {
         help = "Per-provider HTTP timeout (seconds)"
     )]
     timeout: u64,
+
+    #[arg(
+        long,
+        value_name = "NAME",
+        help = "Print a ready-to-paste watchlist preset and exit (see --list-presets)"
+    )]
+    preset: Option<String>,
+
+    #[arg(long, help = "List the available presets and exit")]
+    list_presets: bool,
 }
 
 fn main() {
@@ -43,6 +54,28 @@ fn main() {
         }
         Err(e) => e.exit(),
     };
+
+    // Manual-invocation helpers: emit a preset (or the list) and exit, like --help. Waybar
+    // passes no args, so these never affect the JSON path.
+    if cli.list_presets {
+        for name in presets::NAMES {
+            println!("{name}");
+        }
+        return;
+    }
+    if let Some(name) = &cli.preset {
+        match presets::preset(name) {
+            Some(body) => print!("{body}"),
+            None => {
+                eprintln!(
+                    "unknown preset '{name}'. Available: {}",
+                    presets::NAMES.join(", ")
+                );
+                std::process::exit(2);
+            }
+        }
+        return;
+    }
 
     let colors = ThemeColors::load();
     let json = panic::catch_unwind(panic::AssertUnwindSafe(|| run_to_json(&cli, &colors)))

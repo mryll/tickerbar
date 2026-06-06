@@ -125,6 +125,17 @@ quote = "usd"
 > [!NOTE]
 > `BTC/ARS` via CoinGecko uses CoinGecko's market ARS (≈ official), **not** the blue dollar. Pricing crypto at the blue rate (cross-conversion) is intentionally not done in this version.
 
+### Presets
+
+Don't want to hand-pick symbols? Print a curated, ready-to-paste watchlist and append it to your config:
+
+```bash
+tickerbar --list-presets       # starter, crypto-top, megacap, indices-global, fx-majors, commodities, rates
+tickerbar --preset crypto-top >> ~/.config/tickerbar/config.toml
+```
+
+`starter` is a balanced cross-market set (crypto, a megacap, an index, gold, a Treasury yield, and a forex pair) — a good first config.
+
 ### Market hours
 
 By default tickerbar does **not** poll a market while it's closed — it serves the last close

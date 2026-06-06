@@ -4,6 +4,7 @@ pub mod http;
 pub mod icons;
 pub mod market;
 pub mod model;
+pub mod presets;
 pub mod render;
 pub mod theme;
 pub mod waybar;

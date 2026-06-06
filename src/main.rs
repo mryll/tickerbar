@@ -15,7 +15,7 @@ use tickerbar::providers;
 #[command(
     name = "tickerbar",
     version,
-    about = "Price ticker widget for Waybar (crypto, fiat/ARS, stocks)"
+    about = "Multi-market price ticker for Waybar (crypto, stocks, indices, commodities, forex, rates) — no API key"
 )]
 struct Cli {
     #[arg(

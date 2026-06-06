@@ -1,8 +1,8 @@
 [package]
 name = "tickerbar"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
-description = "A price ticker widget for Waybar (crypto, fiat/ARS, stocks) — no API key"
+description = "A multi-market price ticker for Waybar (crypto, stocks, indices, commodities, forex, rates) — no API key"
 license = "MIT"
 repository = "https://github.com/mryll/tickerbar"
 keywords = ["waybar", "crypto", "finance", "wayland", "hyprland"]

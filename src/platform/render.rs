@@ -377,23 +377,48 @@ fn build_tooltip(
         .iter()
         .map(|c| c.iter().map(&render_line).collect())
         .collect();
-    let col_widths: Vec<usize> = col_strs
+    let sep = waybar::fg(&colors.dim, " │ ");
+    // Cap columns per band; extra columns wrap into a new band stacked below (narrow/vertical
+    // monitors). When not banding, keep per-column widths so the layout is unchanged.
+    let max_cols = display.tooltip_max_columns;
+    let banding = max_cols > 0 && col_strs.len() > max_cols;
+    let band_size = if banding {
+        max_cols
+    } else {
+        col_strs.len().max(1)
+    };
+    let uniform_w = col_strs
+        .iter()
+        .flat_map(|c| c.iter())
+        .map(|s| waybar::visible_len(s))
+        .max()
+        .unwrap_or(0);
+    let per_col_w: Vec<usize> = col_strs
         .iter()
         .map(|c| c.iter().map(|s| waybar::visible_len(s)).max().unwrap_or(0))
         .collect();
-    let height = col_strs.iter().map(|c| c.len()).max().unwrap_or(0);
-    let sep = waybar::fg(&colors.dim, " │ ");
 
-    let mut grid: Vec<String> = Vec::with_capacity(height);
-    for r in 0..height {
-        let cells: Vec<String> = col_strs
-            .iter()
-            .enumerate()
-            .map(|(ci, col)| {
-                pad_right(col.get(r).map(|s| s.as_str()).unwrap_or(""), col_widths[ci])
-            })
-            .collect();
-        grid.push(cells.join(&sep));
+    // Each band is a stacked grid of up to `band_size` columns, with its own height.
+    let mut bands: Vec<Vec<String>> = Vec::new();
+    for (bi, band) in col_strs.chunks(band_size).enumerate() {
+        let band_height = band.iter().map(|c| c.len()).max().unwrap_or(0);
+        let mut lines = Vec::with_capacity(band_height);
+        for r in 0..band_height {
+            let cells: Vec<String> = band
+                .iter()
+                .enumerate()
+                .map(|(ci, col)| {
+                    let w = if banding {
+                        uniform_w
+                    } else {
+                        per_col_w[bi * band_size + ci]
+                    };
+                    pad_right(col.get(r).map(|s| s.as_str()).unwrap_or(""), w)
+                })
+                .collect();
+            lines.push(cells.join(&sep));
+        }
+        bands.push(lines);
     }
 
     // Frame.
@@ -403,7 +428,7 @@ fn build_tooltip(
         &colors.dim,
         &format!("  \u{f017}  Updated {}", local.format("%H:%M")),
     );
-    let mut measurable: Vec<&str> = grid.iter().map(|s| s.as_str()).collect();
+    let mut measurable: Vec<&str> = bands.iter().flatten().map(|s| s.as_str()).collect();
     measurable.push(footer.as_str());
     let width = waybar::content_width(&measurable).max(waybar::visible_len(&title));
 
@@ -415,8 +440,13 @@ fn build_tooltip(
         &colors.border,
     ));
     out.push(waybar::separator(width, &colors.border, &colors.dim));
-    for g in &grid {
-        out.push(waybar::border_line(g, width, &colors.border));
+    for (i, band) in bands.iter().enumerate() {
+        if i > 0 {
+            out.push(waybar::separator(width, &colors.border, &colors.dim));
+        }
+        for line in band {
+            out.push(waybar::border_line(line, width, &colors.border));
+        }
     }
     out.push(waybar::separator(width, &colors.border, &colors.dim));
     out.push(waybar::border_line(&footer, width, &colors.border));
@@ -570,6 +600,7 @@ mod tests {
             icons: "ascii".into(),
             bar_format: "{label} {price} {arrow}".into(),
             tooltip_rows_per_column: 0,
+            tooltip_max_columns: 0,
         }
     }
 
@@ -761,6 +792,59 @@ mod tests {
         let lines = vec![header(TooltipGroup::Crypto), row(TooltipGroup::Crypto)];
         let cols = chunk_columns(lines, 1);
         assert!(cols.iter().all(|c| !c.is_empty()));
+    }
+
+    #[test]
+    fn exceeding_max_columns_wraps_into_stacked_bands() {
+        let assets: Vec<Asset> = (0..12)
+            .map(|i| Asset {
+                label: format!("S{i}"),
+                source: AssetSource::Cnbc {
+                    symbol: format!("S{i}"),
+                },
+            })
+            .collect();
+        let qs: Vec<Quote> = (0..12)
+            .map(|i| Quote {
+                source: ProviderKind::Cnbc,
+                ..quote(
+                    &format!("S{i}"),
+                    Some(100.0 + i as f64),
+                    Some(Direction::Up),
+                    QuoteState::Fresh,
+                )
+            })
+            .collect();
+        let mut d = disp(DisplayMode::Fixed, 3);
+        d.tooltip_rows_per_column = 4;
+        let mut unlimited = d.clone();
+        unlimited.tooltip_max_columns = 0;
+        let wide = build_tooltip(
+            &assets,
+            &qs,
+            &unlimited,
+            &MarketHours::default(),
+            &ThemeColors::default(),
+            Utc::now(),
+        );
+        d.tooltip_max_columns = 2;
+        let banded = build_tooltip(
+            &assets,
+            &qs,
+            &d,
+            &MarketHours::default(),
+            &ThemeColors::default(),
+            Utc::now(),
+        );
+        assert!(
+            banded.lines().count() > wide.lines().count(),
+            "banding should stack columns into more (shorter) rows"
+        );
+        let widths: Vec<usize> = banded.lines().map(waybar::visible_len).collect();
+        assert!(
+            widths.windows(2).all(|w| w[0] == w[1]),
+            "framed lines equal width"
+        );
     }
 
     #[test]

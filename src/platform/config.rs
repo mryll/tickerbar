@@ -28,6 +28,10 @@ pub struct Display {
     /// Wrap the tooltip into multiple columns every N lines. 0 = single column.
     #[serde(default)]
     pub tooltip_rows_per_column: usize,
+    /// Cap columns shown side by side; extra columns wrap into a new stacked band below.
+    /// 0 = unlimited (single band). Useful for narrow / vertical monitors.
+    #[serde(default)]
+    pub tooltip_max_columns: usize,
 }
 
 fn default_rotate_interval() -> u64 {
@@ -52,6 +56,7 @@ impl Default for Display {
             icons: default_icons(),
             bar_format: default_bar_format(),
             tooltip_rows_per_column: 0,
+            tooltip_max_columns: 0,
         }
     }
 }

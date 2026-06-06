@@ -21,7 +21,7 @@ A price ticker widget for [Waybar](https://github.com/Alexays/Waybar): crypto, t
 - Forex pairs (Frankfurter v2)
 - Stocks/indices with no key via CNBC (`AAPL`, `.SPX`); optional Finnhub with a free key
 - Argentine market (BYMA) with no key via data912 — acciones, bonos, CEDEARs, ONs (in ARS)
-- Multi-column tooltip (`tooltip_rows_per_column`) so large watchlists wrap instead of growing tall
+- Multi-column tooltip (`tooltip_rows_per_column`) so large watchlists wrap instead of growing tall, with a column cap (`tooltip_max_columns`) that stacks extra columns into bands below — fits narrow/vertical monitors
 - Market-hours aware: closed markets aren't polled (built-in calendars) and show `⏸ closed`
 - Compact bar with a configurable format, or opt-in rotating "ticker-tape" mode
 - Per-provider caching with TTLs and rate-limit (HTTP 429) backoff

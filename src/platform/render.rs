@@ -48,6 +48,16 @@ fn fmt_change(c: Option<f64>) -> String {
     }
 }
 
+/// Format an asset's value for display. Rates (yields) render as a percent ("4.53%");
+/// every other class uses the currency-style price formatter. Used for BOTH the column-width
+/// measurement and the actual render so yields stay column-aligned.
+fn fmt_value(price: Option<f64>, group: TooltipGroup) -> String {
+    match (group, price) {
+        (TooltipGroup::Rates, Some(v)) => format!("{v:.2}%"),
+        _ => fmt_price(price),
+    }
+}
+
 fn fmt_age(d: Duration) -> String {
     let secs = d.num_seconds().max(0);
     if secs < 60 {
@@ -73,8 +83,14 @@ fn pad_right(s: &str, width: usize) -> String {
     format!("{}{}", s, " ".repeat(pad))
 }
 
-fn render_one(q: &Quote, fmt: &str, icons: &IconSet, colors: &ThemeColors) -> String {
-    let price_plain = fmt_price(q.price);
+fn render_one(
+    q: &Quote,
+    group: TooltipGroup,
+    fmt: &str,
+    icons: &IconSet,
+    colors: &ThemeColors,
+) -> String {
+    let price_plain = fmt_value(q.price, group);
     let change_plain = fmt_change(q.change_pct);
     let arrow = icons.arrow(q.direction);
     // Color the price + arrow + change% by direction (green up / red down), matching the
@@ -96,31 +112,46 @@ fn render_one(q: &Quote, fmt: &str, icons: &IconSet, colors: &ThemeColors) -> St
         .replace("{price}", &price_s)
         .replace("{change_pct}", &change_s)
         .replace("{arrow}", &arrow_s)
-        .replace("{glyph}", icons.kind_glyph(q.source))
+        .replace("{glyph}", group.glyph_for(*icons))
         .trim()
         .to_string()
 }
 
-/// Assets shown on the bar, per display mode. `epoch` = unix seconds (rotation bucket).
-fn visible<'a>(quotes: &'a [Quote], d: &Display, epoch: u64) -> Vec<&'a Quote> {
+/// Indices of the assets shown on the bar, per display mode. `epoch` = unix seconds (bucket).
+fn visible_indices(len: usize, d: &Display, epoch: u64) -> Vec<usize> {
     match d.mode {
-        DisplayMode::Fixed => quotes.iter().take(d.max_on_bar).collect(),
+        DisplayMode::Fixed => (0..len).take(d.max_on_bar).collect(),
         DisplayMode::Rotate => {
-            if quotes.is_empty() {
+            if len == 0 {
                 return Vec::new();
             }
             let interval = d.rotate_interval.max(1);
-            let idx = ((epoch / interval) as usize) % quotes.len();
-            vec![&quotes[idx]]
+            vec![((epoch / interval) as usize) % len]
         }
     }
 }
 
-pub fn bar_text(quotes: &[Quote], d: &Display, epoch: u64, colors: &ThemeColors) -> String {
+pub fn bar_text(
+    assets: &[Asset],
+    quotes: &[Quote],
+    d: &Display,
+    epoch: u64,
+    colors: &ThemeColors,
+) -> String {
     let icons = IconSet::from_name(&d.icons);
-    visible(quotes, d, epoch)
+    visible_indices(quotes.len(), d, epoch)
         .iter()
-        .map(|q| render_one(q, &d.bar_format, &icons, colors))
+        .filter_map(|&i| {
+            let a = assets.get(i)?;
+            let q = quotes.get(i)?;
+            Some(render_one(
+                q,
+                group_of(&a.source),
+                &d.bar_format,
+                &icons,
+                colors,
+            ))
+        })
         .collect::<Vec<_>>()
         .join("   ")
 }
@@ -165,16 +196,22 @@ pub fn build(
     colors: &ThemeColors,
 ) -> WaybarOutput {
     let epoch = now.timestamp().max(0) as u64;
-    let vis = visible(quotes, &cfg.display, epoch);
-    let text = bar_text(quotes, &cfg.display, epoch, colors);
+    let idx = visible_indices(quotes.len(), &cfg.display, epoch);
+    let vis: Vec<&Quote> = idx.iter().map(|&i| &quotes[i]).collect();
+    let text = bar_text(&cfg.assets, quotes, &cfg.display, epoch, colors);
     let mut class = module_class(quotes, &vis);
     // `closed` class when every asset currently on the bar is in a closed market.
-    let all_closed = !vis.is_empty()
-        && vis.iter().all(|q| {
-            matches!(
-                market::gate(q.source, now, &cfg.market_hours),
-                Gate::Closed { .. }
-            )
+    let all_closed = !idx.is_empty()
+        && idx.iter().all(|&i| {
+            cfg.assets
+                .get(i)
+                .map(|a| {
+                    matches!(
+                        market::gate(&a.source, now, &cfg.market_hours),
+                        Gate::Closed { .. }
+                    )
+                })
+                .unwrap_or(false)
         });
     if all_closed {
         class.push("closed".to_string());
@@ -199,7 +236,7 @@ pub fn build(
 
 /// Tooltip section. Derived from the asset's source (see `group_of`), so the same display
 /// grouping is NOT stored in cached market data.
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 enum TooltipGroup {
     Crypto,
     FiatArs,
@@ -208,10 +245,13 @@ enum TooltipGroup {
     Cedears,
     On,
     Stocks,
+    Indices,
+    Commodities,
+    Rates,
     Forex,
 }
 
-const GROUP_ORDER: [TooltipGroup; 8] = [
+const GROUP_ORDER: [TooltipGroup; 11] = [
     TooltipGroup::Crypto,
     TooltipGroup::FiatArs,
     TooltipGroup::AccionesAr,
@@ -219,6 +259,9 @@ const GROUP_ORDER: [TooltipGroup; 8] = [
     TooltipGroup::Cedears,
     TooltipGroup::On,
     TooltipGroup::Stocks,
+    TooltipGroup::Indices,
+    TooltipGroup::Commodities,
+    TooltipGroup::Rates,
     TooltipGroup::Forex,
 ];
 
@@ -232,19 +275,48 @@ impl TooltipGroup {
             TooltipGroup::Cedears => "CEDEARs",
             TooltipGroup::On => "Corp Bonds",
             TooltipGroup::Stocks => "Stocks",
+            TooltipGroup::Indices => "Indices",
+            TooltipGroup::Commodities => "Commodities",
+            TooltipGroup::Rates => "Rates",
             TooltipGroup::Forex => "Forex",
         }
     }
     fn glyph(self) -> &'static str {
         match self {
-            TooltipGroup::Crypto => "\u{f15a}",     // bitcoin
-            TooltipGroup::FiatArs => "\u{f155}",    // dollar
-            TooltipGroup::AccionesAr => "\u{f201}", // line chart
-            TooltipGroup::Bonos => "\u{f0d6}",      // money
-            TooltipGroup::Cedears => "\u{f0ac}",    // globe
-            TooltipGroup::On => "\u{f1ad}",         // building
-            TooltipGroup::Stocks => "\u{f201}",     // line chart
-            TooltipGroup::Forex => "\u{f0ec}",      // exchange
+            TooltipGroup::Crypto => "\u{f15a}",      // bitcoin
+            TooltipGroup::FiatArs => "\u{f155}",     // dollar
+            TooltipGroup::AccionesAr => "\u{f201}",  // line chart
+            TooltipGroup::Bonos => "\u{f0d6}",       // money
+            TooltipGroup::Cedears => "\u{f0ac}",     // globe
+            TooltipGroup::On => "\u{f1ad}",          // building
+            TooltipGroup::Stocks => "\u{f201}",      // line chart
+            TooltipGroup::Indices => "\u{f1fe}",     // area chart
+            TooltipGroup::Commodities => "\u{f1b2}", // cube
+            TooltipGroup::Rates => "\u{f295}",       // percent
+            TooltipGroup::Forex => "\u{f0ec}",       // exchange
+        }
+    }
+
+    /// Class glyph for the bar `{glyph}` placeholder, honoring the configured icon set so the
+    /// bar matches the tooltip per asset class (commodities/indices/rates are no longer shown
+    /// with the generic stocks glyph).
+    fn glyph_for(self, set: IconSet) -> &'static str {
+        match set {
+            IconSet::Ascii => "",
+            IconSet::Nerd => self.glyph(),
+            IconSet::Emoji => match self {
+                TooltipGroup::Crypto => "🪙",
+                TooltipGroup::FiatArs => "💵",
+                TooltipGroup::AccionesAr => "📈",
+                TooltipGroup::Bonos => "📜",
+                TooltipGroup::Cedears => "🌎",
+                TooltipGroup::On => "🏢",
+                TooltipGroup::Stocks => "📊",
+                TooltipGroup::Indices => "📈",
+                TooltipGroup::Commodities => "🛢",
+                TooltipGroup::Rates => "🏦",
+                TooltipGroup::Forex => "💱",
+            },
         }
     }
 }
@@ -256,6 +328,9 @@ fn group_of(src: &AssetSource) -> TooltipGroup {
         AssetSource::Stooq { .. } | AssetSource::Finnhub { .. } | AssetSource::Cnbc { .. } => {
             TooltipGroup::Stocks
         }
+        AssetSource::Commodity { .. } => TooltipGroup::Commodities,
+        AssetSource::Index { .. } => TooltipGroup::Indices,
+        AssetSource::Rate { .. } => TooltipGroup::Rates,
         AssetSource::Frankfurter { .. } => TooltipGroup::Forex,
         AssetSource::Data912 { panel, .. } => match panel {
             Panel::Acciones => TooltipGroup::AccionesAr,
@@ -295,9 +370,10 @@ fn build_tooltip(
         .map(|q| waybar::visible_len(&waybar::pango_escape(&q.label)))
         .max()
         .unwrap_or(0);
-    let price_w = quotes
+    let price_w = assets
         .iter()
-        .map(|q| waybar::visible_len(&fmt_price(q.price)))
+        .zip(quotes)
+        .map(|(a, q)| waybar::visible_len(&fmt_value(q.price, group_of(&a.source))))
         .max()
         .unwrap_or(0);
     let change_w = quotes
@@ -317,7 +393,7 @@ fn build_tooltip(
         if !v.contains(&s) {
             v.push(s);
         }
-        let closed_now = matches!(market::gate(q.source, now, market), Gate::Closed { .. });
+        let closed_now = matches!(market::gate(&a.source, now, market), Gate::Closed { .. });
         group_closed
             .entry(g)
             .and_modify(|c| *c = *c && closed_now)
@@ -343,7 +419,7 @@ fn build_tooltip(
         for q in members {
             lines.push(TooltipLine::Row {
                 group,
-                text: render_row(q, label_w, price_w, change_w, now, colors),
+                text: render_row(q, group, label_w, price_w, change_w, now, colors),
             });
         }
     }
@@ -489,6 +565,7 @@ fn render_header(
 
 fn render_row(
     q: &Quote,
+    group: TooltipGroup,
     label_w: usize,
     price_w: usize,
     change_w: usize,
@@ -504,7 +581,7 @@ fn render_row(
         &waybar::bold_fg(&colors.text, &waybar::pango_escape(&q.label)),
         label_w,
     );
-    let price = pad_left(&waybar::fg(dir_color, &fmt_price(q.price)), price_w);
+    let price = pad_left(&waybar::fg(dir_color, &fmt_value(q.price, group)), price_w);
     let change_plain = fmt_change(q.change_pct);
     let change = if change_plain.is_empty() {
         pad_left("", change_w)
@@ -609,6 +686,50 @@ mod tests {
     }
 
     #[test]
+    fn the_new_cnbc_classes_map_to_their_tooltip_groups() {
+        assert_eq!(
+            group_of(&AssetSource::Commodity {
+                symbol: "gold".into()
+            }),
+            TooltipGroup::Commodities
+        );
+        assert_eq!(
+            group_of(&AssetSource::Index {
+                symbol: "vix".into()
+            }),
+            TooltipGroup::Indices
+        );
+        assert_eq!(
+            group_of(&AssetSource::Rate {
+                symbol: "us10y".into()
+            }),
+            TooltipGroup::Rates
+        );
+    }
+
+    #[test]
+    fn a_rate_value_renders_as_a_percent_but_a_commodity_as_a_price() {
+        assert_eq!(fmt_value(Some(4.532), TooltipGroup::Rates), "4.53%");
+        assert_eq!(
+            fmt_value(Some(4353.9), TooltipGroup::Commodities),
+            "4,353.90"
+        );
+    }
+
+    /// Generic (non-rate) assets aligned 1:1 with quotes, for bar-rendering tests.
+    fn assets_for(qs: &[Quote]) -> Vec<Asset> {
+        qs.iter()
+            .map(|q| Asset {
+                label: q.label.clone(),
+                source: AssetSource::Coingecko {
+                    id: "x".into(),
+                    quote: "usd".into(),
+                },
+            })
+            .collect()
+    }
+
+    #[test]
     fn fixed_mode_shows_at_most_max_on_bar_assets() {
         let qs = vec![
             quote("A", Some(1.0), Some(Direction::Up), QuoteState::Fresh),
@@ -616,6 +737,7 @@ mod tests {
             quote("C", Some(3.0), Some(Direction::Up), QuoteState::Fresh),
         ];
         let text = bar_text(
+            &assets_for(&qs),
             &qs,
             &disp(DisplayMode::Fixed, 2),
             0,
@@ -632,8 +754,9 @@ mod tests {
             quote("B", Some(2.0), None, QuoteState::Fresh),
         ];
         let d = disp(DisplayMode::Rotate, 1);
-        assert!(bar_text(&qs, &d, 0, &ThemeColors::default()).contains('A'));
-        assert!(bar_text(&qs, &d, 5, &ThemeColors::default()).contains('B'));
+        let a = assets_for(&qs);
+        assert!(bar_text(&a, &qs, &d, 0, &ThemeColors::default()).contains('A'));
+        assert!(bar_text(&a, &qs, &d, 5, &ThemeColors::default()).contains('B'));
     }
 
     #[test]
@@ -672,6 +795,7 @@ mod tests {
     fn a_missing_price_renders_as_a_dash() {
         let qs = vec![quote("A", None, None, QuoteState::Missing)];
         let text = bar_text(
+            &assets_for(&qs),
             &qs,
             &disp(DisplayMode::Fixed, 3),
             0,

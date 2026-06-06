@@ -3,7 +3,7 @@
 [![AUR version](https://img.shields.io/aur/version/tickerbar)](https://aur.archlinux.org/packages/tickerbar)
 [![License: MIT](https://img.shields.io/github/license/mryll/tickerbar)](LICENSE)
 
-A multi-market price ticker for [Waybar](https://github.com/Alexays/Waybar): crypto, stocks & indices, forex, and fiat currencies in one module — with **no API key**.
+A multi-market price ticker for [Waybar](https://github.com/Alexays/Waybar): crypto, stocks & indices, commodities, forex, Treasury yields, and fiat currencies in one module — with **no API key**.
 
 ![tickerbar in Waybar](screenshots/bar.png)
 
@@ -14,7 +14,7 @@ A multi-market price ticker for [Waybar](https://github.com/Alexays/Waybar): cry
 
 ## Why tickerbar?
 
-- **Many markets, one widget, no API key.** Crypto (CoinGecko), US stocks & indices (CNBC), forex (ECB / Frankfurter) and fiat — each from the best free, key-less source. Track BTC, AAPL, the S&P 500 and EUR/USD side by side.
+- **Many markets, one widget, no API key.** Crypto (CoinGecko), US stocks & indices, commodities and Treasury yields (CNBC), forex (ECB / Frankfurter) and fiat — each from the best free, key-less source. Track BTC, NVDA, the S&P 500, gold, the US 10Y and EUR/USD side by side.
 - **Never breaks your bar.** Any failure — a dead API, a rate limit, a malformed response, even a corrupt config — still prints valid Waybar JSON and exits 0. A down provider never blanks the others.
 - **A tooltip worth opening.** A column-aligned table grouped by asset class, color-coded up/down, that wraps long watchlists into stacked columns (great for narrow/vertical monitors) and picks up your [Omarchy](https://omarchy.org) theme colors.
 - **Market-hours aware.** Closed markets aren't polled and show `⏸ closed` — only crypto runs 24/7.
@@ -30,6 +30,7 @@ The tooltip groups your watchlist by asset class and wraps into columns as it gr
 - Argentine dollar: oficial, blue, MEP/bolsa, CCL, etc. (DolarAPI), buy/sell/mid side
 - Forex pairs (Frankfurter v2)
 - Stocks/indices with no key via CNBC (`AAPL`, `.SPX`); optional Finnhub with a free key
+- Commodities, indices & Treasury yields with no key via friendly aliases (`gold`, `wti`, `vix`, `us10y`) — yields render as a percent
 - Argentine market (BYMA) with no key via data912 — acciones, bonos, CEDEARs, ONs (in ARS)
 - Multi-column tooltip (`tooltip_rows_per_column`) so large watchlists wrap instead of growing tall, with a column cap (`tooltip_max_columns`) that stacks extra columns into bands below — fits narrow/vertical monitors
 - Market-hours aware: closed markets aren't polled (built-in calendars) and show `⏸ closed`
@@ -107,6 +108,9 @@ quote = "usd"
 | `dolarapi` | Argentine peso | No | `casa` + `side`. Uses the provider's own update timestamp. |
 | `frankfurter` | Forex | No | `base` + `quote`. Reference rates (daily). |
 | `cnbc` | Stocks/indices | No | `symbol` — plain ticker (`AAPL`) or index with a leading dot (`.SPX`, `.IXIC`, `.DJI`). |
+| `commodity` | Commodities | No | `symbol` — friendly alias (`gold`, `silver`, `wti`, `brent`, `natgas`, `copper`, `platinum`, `palladium`) or any raw CNBC symbol (`@GC.1`). Via CNBC. |
+| `index` | Indices | No | `symbol` — friendly alias (`vix`, `sp500`, `nasdaq`, `dow`, `dax`, `ftse`, `nikkei`, `hangseng`) or raw (`.VIX`). Via CNBC. |
+| `rate` | Treasury yields | No | `symbol` — `us10y`, `us2y`, `us30y`, `us5y`. Rendered as a percent (e.g. `4.53%`). Via CNBC. |
 | `data912` | Argentine market (BYMA) | No | `panel` (`acciones`/`bonos`/`cedears`/`corp`) + `symbol` (e.g. `ALUA`, `GD35`, `MELI`). ARS, ~2h delay. |
 | `finnhub` | Stocks/indices | Yes (free) | `symbol`. Token via `FINNHUB_TOKEN` env var. |
 | `stooq` | Stocks/indices | No | `symbol` (e.g. `aapl.us`). Best-effort; often anti-bot-walled → `n/d`. |
@@ -126,7 +130,9 @@ quote = "usd"
 By default tickerbar does **not** poll a market while it's closed — it serves the last close
 from cache and marks the panel `⏸ closed` in the tooltip. Built-in calendars (timezone- and
 DST-aware via `chrono-tz`): crypto 24/7; BYMA (data912) Mon–Fri 10:30–17:00 ART; US stocks
-(cnbc/finnhub/stooq) Mon–Fri 09:30–16:00 ET; ECB forex (frankfurter) weekdays.
+(cnbc/finnhub/stooq) Mon–Fri 09:30–16:00 ET; ECB forex (frankfurter) weekdays. Commodities,
+indices and rates (`commodity`/`index`/`rate`) are always polled in this version (commodities
+trade nearly 24/5) — they have no `⏸ closed` badge.
 
 ```toml
 [market_hours]

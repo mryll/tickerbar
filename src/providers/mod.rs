@@ -84,6 +84,23 @@ fn assemble(
         .collect()
 }
 
+/// Fetch policy for a provider group. The group is ONE batched HTTP call, so it is fetched if
+/// ANY asset's market is open (e.g. a CNBC batch with a 24/5 commodity stays live even when the
+/// equity session is closed). Closed only when every asset is closed, at the latest close seen.
+fn group_policy(group: &[&Asset], now: DateTime<Utc>, market: &MarketHours) -> FetchPolicy {
+    let mut last_close = None;
+    for a in group {
+        match market::gate(&a.source, now, market) {
+            Gate::Open => return FetchPolicy::Normal,
+            Gate::Closed { last_close: lc } => last_close = Some(lc),
+        }
+    }
+    match last_close {
+        Some(lc) => FetchPolicy::Closed { last_close: lc },
+        None => FetchPolicy::Normal,
+    }
+}
+
 /// Fetch every configured asset, grouped by provider, each group through the cache.
 /// Closed markets (per `market`) are not re-fetched; their last close is served from cache.
 pub fn fetch_all(
@@ -99,10 +116,7 @@ pub fn fetch_all(
         let group: Vec<&Asset> = indices.iter().map(|i| &assets[*i]).collect();
         let key = build_key(kind, &group);
         let group_owned: Vec<Asset> = group.iter().map(|a| (*a).clone()).collect();
-        let policy = match market::gate(kind, now, market) {
-            Gate::Open => FetchPolicy::Normal,
-            Gate::Closed { last_close } => FetchPolicy::Closed { last_close },
-        };
+        let policy = group_policy(&group, now, market);
         let quotes = cache::get_or_fetch(&dir, &key, ttl(kind), now, policy, || {
             let refs: Vec<&Asset> = group_owned.iter().collect();
             fetch_kind(kind, &refs, http, now)

@@ -45,7 +45,12 @@ fn cg(label: &str, id: &str, price: f64, chg: f64) -> (Asset, Quote) {
     )
 }
 fn us(label: &str, sym: &str, price: f64, chg: f64) -> (Asset, Quote) {
-    pair(label, AssetSource::Cnbc { symbol: sym.into() }, price, Some(chg))
+    pair(
+        label,
+        AssetSource::Cnbc { symbol: sym.into() },
+        price,
+        Some(chg),
+    )
 }
 fn fx(label: &str, base: &str, price: f64, chg: f64) -> (Asset, Quote) {
     pair(
@@ -81,7 +86,10 @@ fn ar(label: &str, panel: Panel, price: f64, chg: f64) -> (Asset, Quote) {
     )
 }
 
-fn build_output(pairs: Vec<(Asset, Quote)>, display: Display) -> tickerbar::platform::waybar::WaybarOutput {
+fn build_output(
+    pairs: Vec<(Asset, Quote)>,
+    display: Display,
+) -> tickerbar::platform::waybar::WaybarOutput {
     let (assets, quotes): (Vec<Asset>, Vec<Quote>) = pairs.into_iter().unzip();
     let cfg = Config {
         display,

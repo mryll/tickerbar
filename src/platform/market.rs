@@ -2,7 +2,7 @@ use chrono::{DateTime, Datelike, NaiveTime, TimeZone, Utc, Weekday};
 use chrono_tz::Tz;
 
 use crate::platform::config::MarketHours;
-use crate::platform::model::ProviderKind;
+use crate::platform::model::AssetSource;
 
 pub enum Gate {
     Open,
@@ -21,26 +21,34 @@ fn at(h: u32, m: u32) -> NaiveTime {
     NaiveTime::from_hms_opt(h, m, 0).expect("valid time")
 }
 
-fn spec(kind: ProviderKind) -> Option<MarketSpec> {
+fn spec(source: &AssetSource) -> Option<MarketSpec> {
     let ba = chrono_tz::America::Argentina::Buenos_Aires;
-    match kind {
-        ProviderKind::CoinGecko => None, // 24/7
-        ProviderKind::Data912 => Some(MarketSpec {
+    match source {
+        AssetSource::Coingecko { .. } => None, // 24/7
+        // v1: commodities/indices/rates (CNBC-backed) are not gated — always polled.
+        // Commodities trade ~24/5; VIX/yields off-hours polling is cheap (cached). Per-class
+        // calendars are a future iteration.
+        AssetSource::Commodity { .. } | AssetSource::Index { .. } | AssetSource::Rate { .. } => {
+            None
+        }
+        AssetSource::Data912 { .. } => Some(MarketSpec {
             tz: ba,
             open: at(10, 30),
             fetch_close: at(19, 30), // 17:00 close + ~2h30 feed delay/grace
         }),
-        ProviderKind::DolarApi => Some(MarketSpec {
+        AssetSource::Dolarapi { .. } => Some(MarketSpec {
             tz: ba,
             open: at(10, 0),
             fetch_close: at(17, 30),
         }),
-        ProviderKind::Stooq | ProviderKind::Finnhub | ProviderKind::Cnbc => Some(MarketSpec {
-            tz: chrono_tz::America::New_York,
-            open: at(9, 30),
-            fetch_close: at(16, 15), // 16:00 close + grace
-        }),
-        ProviderKind::Frankfurter => Some(MarketSpec {
+        AssetSource::Stooq { .. } | AssetSource::Finnhub { .. } | AssetSource::Cnbc { .. } => {
+            Some(MarketSpec {
+                tz: chrono_tz::America::New_York,
+                open: at(9, 30),
+                fetch_close: at(16, 15), // 16:00 close + grace
+            })
+        }
+        AssetSource::Frankfurter { .. } => Some(MarketSpec {
             tz: chrono_tz::Europe::Berlin,
             open: at(0, 0),
             fetch_close: at(23, 59), // ECB reference rate: weekday-only, daily
@@ -52,11 +60,11 @@ fn is_weekday(wd: Weekday) -> bool {
     !matches!(wd, Weekday::Sat | Weekday::Sun)
 }
 
-pub fn gate(kind: ProviderKind, now: DateTime<Utc>, cfg: &MarketHours) -> Gate {
-    if !cfg.applies_to(kind.as_str()) {
+pub fn gate(source: &AssetSource, now: DateTime<Utc>, cfg: &MarketHours) -> Gate {
+    if !cfg.applies_to(source.kind().as_str()) {
         return Gate::Open;
     }
-    let spec = match spec(kind) {
+    let spec = match spec(source) {
         None => return Gate::Open,
         Some(s) => s,
     };
@@ -99,9 +107,33 @@ fn last_close(spec: &MarketSpec, now: DateTime<Utc>) -> DateTime<Utc> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::platform::model::Panel;
 
     fn cfg() -> MarketHours {
         MarketHours::default()
+    }
+
+    fn coingecko() -> AssetSource {
+        AssetSource::Coingecko {
+            id: "bitcoin".into(),
+            quote: "usd".into(),
+        }
+    }
+    fn cnbc() -> AssetSource {
+        AssetSource::Cnbc {
+            symbol: "AAPL".into(),
+        }
+    }
+    fn data912() -> AssetSource {
+        AssetSource::Data912 {
+            panel: Panel::Acciones,
+            symbol: "ALUA".into(),
+        }
+    }
+    fn commodity() -> AssetSource {
+        AssetSource::Commodity {
+            symbol: "gold".into(),
+        }
     }
 
     /// Build a UTC instant from a wall-clock time in the given tz.
@@ -115,10 +147,15 @@ mod tests {
     #[test]
     fn crypto_is_always_open() {
         let now = utc(chrono_tz::UTC, 2026, 6, 7, 3, 0); // a Sunday, 3am
-        assert!(matches!(
-            gate(ProviderKind::CoinGecko, now, &cfg()),
-            Gate::Open
-        ));
+        assert!(matches!(gate(&coingecko(), now, &cfg()), Gate::Open));
+    }
+
+    #[test]
+    fn a_commodity_is_never_gated_in_v1() {
+        // Saturday: equities are closed, but commodities (~24/5) are always polled in v1.
+        let ny = chrono_tz::America::New_York;
+        let now = utc(ny, 2026, 6, 6, 3, 0);
+        assert!(matches!(gate(&commodity(), now, &cfg()), Gate::Open));
     }
 
     #[test]
@@ -126,24 +163,21 @@ mod tests {
         let mut c = cfg();
         c.enabled = false;
         let now = utc(chrono_tz::America::New_York, 2026, 6, 6, 3, 0); // Sat night
-        assert!(matches!(gate(ProviderKind::Cnbc, now, &c), Gate::Open));
+        assert!(matches!(gate(&cnbc(), now, &c), Gate::Open));
     }
 
     #[test]
     fn byma_is_open_midsession_on_a_weekday() {
         let ba = chrono_tz::America::Argentina::Buenos_Aires;
         let now = utc(ba, 2026, 6, 4, 14, 0); // Thursday 14:00 ART
-        assert!(matches!(
-            gate(ProviderKind::Data912, now, &cfg()),
-            Gate::Open
-        ));
+        assert!(matches!(gate(&data912(), now, &cfg()), Gate::Open));
     }
 
     #[test]
     fn byma_is_closed_overnight_with_last_close_on_the_prior_weekday() {
         let ba = chrono_tz::America::Argentina::Buenos_Aires;
         let now = utc(ba, 2026, 6, 4, 3, 0); // Thursday 03:00 ART (before open)
-        match gate(ProviderKind::Data912, now, &cfg()) {
+        match gate(&data912(), now, &cfg()) {
             Gate::Closed { last_close } => {
                 // last close should be Wednesday 19:30 ART
                 let lc = last_close.with_timezone(&ba);
@@ -158,10 +192,7 @@ mod tests {
     fn byma_is_closed_on_the_weekend() {
         let ba = chrono_tz::America::Argentina::Buenos_Aires;
         let now = utc(ba, 2026, 6, 6, 14, 0); // Saturday
-        assert!(matches!(
-            gate(ProviderKind::Data912, now, &cfg()),
-            Gate::Closed { .. }
-        ));
+        assert!(matches!(gate(&data912(), now, &cfg()), Gate::Closed { .. }));
     }
 
     #[test]
@@ -169,11 +200,11 @@ mod tests {
         let ny = chrono_tz::America::New_York;
         // Summer (EDT) Wednesday and winter (EST) Wednesday — both 14:00 local are open.
         assert!(matches!(
-            gate(ProviderKind::Cnbc, utc(ny, 2026, 7, 1, 14, 0), &cfg()),
+            gate(&cnbc(), utc(ny, 2026, 7, 1, 14, 0), &cfg()),
             Gate::Open
         ));
         assert!(matches!(
-            gate(ProviderKind::Cnbc, utc(ny, 2026, 1, 7, 14, 0), &cfg()),
+            gate(&cnbc(), utc(ny, 2026, 1, 7, 14, 0), &cfg()),
             Gate::Open
         ));
     }
@@ -182,10 +213,7 @@ mod tests {
     fn us_market_closed_after_session() {
         let ny = chrono_tz::America::New_York;
         let now = utc(ny, 2026, 7, 1, 20, 0); // 20:00 ET, after 16:15
-        assert!(matches!(
-            gate(ProviderKind::Cnbc, now, &cfg()),
-            Gate::Closed { .. }
-        ));
+        assert!(matches!(gate(&cnbc(), now, &cfg()), Gate::Closed { .. }));
     }
 
     #[test]
@@ -197,6 +225,6 @@ mod tests {
         );
         let ny = chrono_tz::America::New_York;
         let now = utc(ny, 2026, 6, 6, 3, 0); // Sat night
-        assert!(matches!(gate(ProviderKind::Cnbc, now, &c), Gate::Open));
+        assert!(matches!(gate(&cnbc(), now, &c), Gate::Open));
     }
 }

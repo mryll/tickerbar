@@ -121,6 +121,18 @@ pub enum AssetSource {
     Cnbc {
         symbol: String,
     },
+    /// Commodity via CNBC (friendly alias or raw symbol). e.g. gold -> @GC.1.
+    Commodity {
+        symbol: String,
+    },
+    /// Index via CNBC (friendly alias or raw symbol). e.g. vix -> .VIX, sp500 -> .SPX.
+    Index {
+        symbol: String,
+    },
+    /// Interest rate / Treasury yield via CNBC. e.g. us10y -> US10Y. Displayed as a percent.
+    Rate {
+        symbol: String,
+    },
     Data912 {
         panel: Panel,
         symbol: String,
@@ -136,6 +148,10 @@ impl AssetSource {
             AssetSource::Frankfurter { .. } => ProviderKind::Frankfurter,
             AssetSource::Finnhub { .. } => ProviderKind::Finnhub,
             AssetSource::Cnbc { .. } => ProviderKind::Cnbc,
+            // Commodities/indices/rates are served by the CNBC slice (same endpoint).
+            AssetSource::Commodity { .. } => ProviderKind::Cnbc,
+            AssetSource::Index { .. } => ProviderKind::Cnbc,
+            AssetSource::Rate { .. } => ProviderKind::Cnbc,
             AssetSource::Data912 { .. } => ProviderKind::Data912,
         }
     }
@@ -149,6 +165,11 @@ impl AssetSource {
             AssetSource::Frankfurter { base, quote } => format!("fx:{base}:{quote}"),
             AssetSource::Finnhub { symbol } => format!("fh:{symbol}"),
             AssetSource::Cnbc { symbol } => format!("cb:{symbol}"),
+            // Raw symbol as typed (alias resolution stays in cnbc.rs); class-prefixed so the
+            // key is collision-safe vs plain `cb:` stocks.
+            AssetSource::Commodity { symbol } => format!("cb:com:{symbol}"),
+            AssetSource::Index { symbol } => format!("cb:idx:{symbol}"),
+            AssetSource::Rate { symbol } => format!("cb:rate:{symbol}"),
             AssetSource::Data912 { panel, symbol } => format!("d9:{}:{symbol}", panel.as_str()),
         }
     }
@@ -214,6 +235,25 @@ mod tests {
             symbol: "aapl.us".into(),
         };
         assert_eq!(a.kind(), ProviderKind::Stooq);
+    }
+
+    #[test]
+    fn cnbc_backed_classes_share_the_cnbc_provider_with_distinct_cache_keys() {
+        let com = AssetSource::Commodity {
+            symbol: "gold".into(),
+        };
+        let idx = AssetSource::Index {
+            symbol: "vix".into(),
+        };
+        let rate = AssetSource::Rate {
+            symbol: "us10y".into(),
+        };
+        assert_eq!(com.kind(), ProviderKind::Cnbc);
+        assert_eq!(idx.kind(), ProviderKind::Cnbc);
+        assert_eq!(rate.kind(), ProviderKind::Cnbc);
+        assert_eq!(com.cache_descriptor(), "cb:com:gold");
+        assert_eq!(idx.cache_descriptor(), "cb:idx:vix");
+        assert_eq!(rate.cache_descriptor(), "cb:rate:us10y");
     }
 
     #[test]

@@ -89,6 +89,30 @@ label = "S&P500"
 provider = "cnbc"
 symbol = ".SPX"
 
+# Commodities via CNBC — no API key. Friendly names (or any raw CNBC symbol like "@GC.1").
+# commodity: gold silver wti brent natgas copper platinum palladium
+[[asset]]
+label = "Gold"
+provider = "commodity"
+symbol = "gold"
+
+[[asset]]
+label = "WTI"
+provider = "commodity"
+symbol = "wti"
+
+# Indices via CNBC — index: vix sp500 nasdaq dow dax ftse nikkei hangseng
+[[asset]]
+label = "VIX"
+provider = "index"
+symbol = "vix"
+
+# Treasury yields via CNBC — rate: us10y us2y us30y us5y (displayed as a percent, e.g. 4.53%)
+[[asset]]
+label = "US 10Y"
+provider = "rate"
+symbol = "us10y"
+
 # ----- Other stock providers (opt-in) --------------------------------------------------
 # Finnhub — reliable, needs a free key exported as FINNHUB_TOKEN (token sent via header):
 #   export FINNHUB_TOKEN=your_free_token

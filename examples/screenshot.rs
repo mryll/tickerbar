@@ -209,8 +209,47 @@ fn bar() -> String {
     build_output(pairs, display).text
 }
 
+fn ranged(pair: (Asset, Quote), lo: f64, hi: f64) -> (Asset, Quote) {
+    let (a, mut q) = pair;
+    q.day_low = Some(lo);
+    q.day_high = Some(hi);
+    (a, q)
+}
+
+/// Full WaybarOutput (bar text + tooltip) for a cross-class showcase with intraday ranges.
+fn showcase() -> tickerbar::platform::waybar::WaybarOutput {
+    let pairs = vec![
+        cg("BTC", "bitcoin", 68_000.50, 1.23),
+        cg("ETH", "ethereum", 3_205.80, -0.45),
+        ranged(com("Gold", "gold", 2_412.30, 0.74), 2_398.00, 2_421.50),
+        ranged(idx("S&P 500", "sp500", 5_588.20, 0.32), 5_560.10, 5_599.40),
+        ranged(us("NVDA", "NVDA", 121.40, 3.92), 118.20, 123.05),
+        ranged(idx("VIX", "vix", 13.20, -4.80), 12.80, 14.60),
+        ranged(com("WTI", "wti", 78.40, -1.36), 77.10, 79.85),
+        ranged(rate("US 10Y", "us10y", 4.53, 1.23), 4.49, 4.56),
+        ranged(rate("US 2Y", "us2y", 4.71, -0.30), 4.68, 4.74),
+        fx("EUR/USD", "eur", 1.0852, -0.12),
+    ];
+    let display = Display {
+        max_on_bar: 4,
+        tooltip_rows_per_column: 0,
+        tooltip_max_columns: 0,
+        tooltip_range: true,
+        ..Display::default()
+    };
+    build_output(pairs, display)
+}
+
 fn main() {
     let which = std::env::args().nth(1).unwrap_or_else(|| "simple".into());
+    if which == "json" {
+        let out = showcase();
+        println!(
+            "{}",
+            serde_json::to_string(&out).expect("serialize WaybarOutput")
+        );
+        return;
+    }
     let out = match which.as_str() {
         "full" => full(),
         "bar" => bar(),

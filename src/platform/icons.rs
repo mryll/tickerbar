@@ -8,7 +8,7 @@ pub enum IconSet {
 }
 
 impl IconSet {
-    pub fn from_str(s: &str) -> Self {
+    pub fn from_name(s: &str) -> Self {
         match s {
             "emoji" => IconSet::Emoji,
             "ascii" => IconSet::Ascii,
@@ -39,10 +39,12 @@ impl IconSet {
             (IconSet::Emoji, ProviderKind::DolarApi) => "💵",
             (IconSet::Emoji, ProviderKind::Stooq) => "📊",
             (IconSet::Emoji, ProviderKind::Frankfurter) => "💱",
+            (IconSet::Emoji, ProviderKind::Finnhub) => "📊",
             (_, ProviderKind::CoinGecko) => "\u{f15a}", // nf-fa-bitcoin
             (_, ProviderKind::DolarApi) => "\u{f155}",  // nf-fa-dollar
             (_, ProviderKind::Stooq) => "\u{f201}",     // nf-fa-line_chart
             (_, ProviderKind::Frankfurter) => "\u{f0ec}", // nf-fa-exchange
+            (_, ProviderKind::Finnhub) => "\u{f201}",   // nf-fa-line_chart
         }
     }
 }

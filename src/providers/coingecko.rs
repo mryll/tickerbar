@@ -96,7 +96,7 @@ mod tests {
     #[test]
     fn a_coingecko_response_maps_to_a_quote_with_price_and_24h_change() {
         let body = include_str!("../../tests/fixtures/coingecko_ok.json");
-        let assets = vec![asset("BTC", "bitcoin", "usd")];
+        let assets = [asset("BTC", "bitcoin", "usd")];
         let refs: Vec<&Asset> = assets.iter().collect();
         let qs = parse(body, &refs, Utc::now());
         assert_eq!(qs[0].price, Some(68000.5));
@@ -109,7 +109,7 @@ mod tests {
     #[test]
     fn a_zero_price_is_treated_as_missing_not_zero() {
         let body = include_str!("../../tests/fixtures/coingecko_ok.json");
-        let assets = vec![asset("ETH", "ethereum", "usd")];
+        let assets = [asset("ETH", "ethereum", "usd")];
         let refs: Vec<&Asset> = assets.iter().collect();
         let qs = parse(body, &refs, Utc::now());
         assert_eq!(qs[0].price, None);
@@ -118,7 +118,7 @@ mod tests {
 
     #[test]
     fn a_symbol_absent_from_the_batch_is_reported_as_missing() {
-        let assets = vec![asset("DOGE", "dogecoin", "usd")];
+        let assets = [asset("DOGE", "dogecoin", "usd")];
         let refs: Vec<&Asset> = assets.iter().collect();
         let qs = parse("{}", &refs, Utc::now());
         assert_eq!(qs[0].state, QuoteState::Missing);
@@ -126,7 +126,7 @@ mod tests {
 
     #[test]
     fn a_malformed_body_yields_error_quotes_without_panicking() {
-        let assets = vec![asset("BTC", "bitcoin", "usd")];
+        let assets = [asset("BTC", "bitcoin", "usd")];
         let refs: Vec<&Asset> = assets.iter().collect();
         let qs = parse("{not json", &refs, Utc::now());
         assert_eq!(qs[0].state, QuoteState::Error);

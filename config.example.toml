@@ -1,7 +1,12 @@
 # tickerbar config — copy to ~/.config/tickerbar/config.toml
 #
-# Stock/index quotes (Stooq) are delayed/best-effort — tickerbar is NOT a live trading
-# feed. Crypto (CoinGecko) and the Argentine dollar (DolarAPI) update more frequently.
+# The crypto / Argentine-dollar / forex providers below work with NO API key.
+#
+# STOCKS: there is currently no reliable no-key stock source. Stooq is best-effort and is
+# often behind an anti-bot wall (quotes then show as "n/d"). For reliable stock/index
+# quotes, use the `finnhub` provider with a free API key exported as FINNHUB_TOKEN
+# (https://finnhub.io, free tier ~60 req/min). Both stock options are shown commented out
+# at the bottom. tickerbar is NOT a live trading feed.
 
 [display]
 mode = "fixed"          # "fixed" | "rotate"
@@ -24,10 +29,16 @@ id = "ethereum"
 quote = "usd"
 
 [[asset]]
+label = "BTC/ARS"
+provider = "coingecko"
+id = "bitcoin"
+quote = "ars"          # CoinGecko's market ARS (≈ official), NOT the blue dollar
+
+[[asset]]
 label = "Blue"
 provider = "dolarapi"
 casa = "blue"
-side = "sell"           # "buy" | "sell" | "mid"
+side = "sell"          # "buy" | "sell" | "mid"
 
 [[asset]]
 label = "MEP"
@@ -36,17 +47,26 @@ casa = "bolsa"
 side = "sell"
 
 [[asset]]
-label = "AAPL"
-provider = "stooq"
-symbol = "aapl.us"
-
-[[asset]]
-label = "S&P500"
-provider = "stooq"
-symbol = "^spx"
-
-[[asset]]
 label = "EUR/USD"
 provider = "frankfurter"
 base = "eur"
 quote = "usd"
+
+# ----- Stocks / indices (opt-in) -------------------------------------------------------
+# Option A — Stooq, no key, best-effort (often blocked → shows "n/d"):
+# [[asset]]
+# label = "AAPL"
+# provider = "stooq"
+# symbol = "aapl.us"
+#
+# Option B — Finnhub, reliable, free key required. Export the token first:
+#   export FINNHUB_TOKEN=your_free_token   # in your shell / Waybar environment
+# [[asset]]
+# label = "AAPL"
+# provider = "finnhub"
+# symbol = "AAPL"
+#
+# [[asset]]
+# label = "S&P500"
+# provider = "finnhub"
+# symbol = "^GSPC"

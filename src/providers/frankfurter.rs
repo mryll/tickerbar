@@ -1,13 +1,21 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 
 use chrono::{DateTime, Utc};
-use serde_json::Value;
+use serde::Deserialize;
 
 use crate::platform::http::Http;
 use crate::platform::model::*;
 
+/// Frankfurter v2 `/v2/rates` returns an array of rate rows, one per requested quote.
+#[derive(Deserialize)]
+struct RateRow {
+    quote: String,
+    rate: Option<f64>,
+    date: Option<String>,
+}
+
 pub fn fetch(assets: &[&Asset], http: &Http, now: DateTime<Utc>) -> Result<Vec<Quote>, FetchError> {
-    // Frankfurter requires one base currency per request — group accordingly.
+    // One request per base currency (the `base` param is singular).
     let mut by_base: BTreeMap<String, Vec<&Asset>> = BTreeMap::new();
     for a in assets {
         if let AssetSource::Frankfurter { base, .. } = &a.source {
@@ -38,7 +46,7 @@ pub fn fetch(assets: &[&Asset], http: &Http, now: DateTime<Utc>) -> Result<Vec<Q
 }
 
 fn parse_base(base: &str, body: &str, assets: &[&Asset], now: DateTime<Utc>) -> Vec<Quote> {
-    let root: Value = match serde_json::from_str(body) {
+    let rows: Vec<RateRow> = match serde_json::from_str(body) {
         Ok(v) => v,
         Err(_) => {
             return assets
@@ -47,9 +55,13 @@ fn parse_base(base: &str, body: &str, assets: &[&Asset], now: DateTime<Utc>) -> 
                 .collect()
         }
     };
-    let as_of = root
-        .get("date")
-        .and_then(Value::as_str)
+    let rates: HashMap<String, f64> = rows
+        .iter()
+        .filter_map(|r| r.rate.map(|v| (r.quote.to_uppercase(), v)))
+        .collect();
+    let as_of = rows
+        .iter()
+        .find_map(|r| r.date.as_deref())
         .and_then(|d| chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").ok())
         .and_then(|d| d.and_hms_opt(0, 0, 0))
         .map(|dt| DateTime::<Utc>::from_naive_utc_and_offset(dt, Utc));
@@ -60,12 +72,11 @@ fn parse_base(base: &str, body: &str, assets: &[&Asset], now: DateTime<Utc>) -> 
                 AssetSource::Frankfurter { quote, .. } => quote.to_uppercase(),
                 _ => return Quote::unavailable(a, QuoteState::Error, now),
             };
-            let price = root
-                .get("rates")
-                .and_then(|r| r.get(&quote))
-                .and_then(Value::as_f64)
-                .filter(|p| p.is_finite() && *p != 0.0);
-            match price {
+            match rates
+                .get(&quote)
+                .copied()
+                .filter(|p| p.is_finite() && *p != 0.0)
+            {
                 Some(p) => Quote {
                     label: a.label.clone(),
                     base: base.to_string(),
@@ -104,16 +115,17 @@ mod tests {
     #[test]
     fn a_pair_rate_is_read_for_its_base() {
         let body = include_str!("../../tests/fixtures/frankfurter_eur.json");
-        let assets = vec![asset("eur", "usd")];
+        let assets = [asset("eur", "usd")];
         let refs: Vec<&Asset> = assets.iter().collect();
         let qs = parse_base("eur", body, &refs, Utc::now());
         assert_eq!(qs[0].price, Some(1.08));
+        assert!(qs[0].as_of.is_some());
     }
 
     #[test]
     fn a_missing_quote_currency_is_missing() {
         let body = include_str!("../../tests/fixtures/frankfurter_eur.json");
-        let assets = vec![asset("eur", "jpy")];
+        let assets = [asset("eur", "jpy")];
         let refs: Vec<&Asset> = assets.iter().collect();
         let qs = parse_base("eur", body, &refs, Utc::now());
         assert_eq!(qs[0].state, QuoteState::Missing);

@@ -36,6 +36,7 @@ pub enum ProviderKind {
     DolarApi,
     Stooq,
     Frankfurter,
+    Finnhub,
 }
 
 impl ProviderKind {
@@ -45,22 +46,19 @@ impl ProviderKind {
             ProviderKind::DolarApi => "dolarapi",
             ProviderKind::Stooq => "stooq",
             ProviderKind::Frankfurter => "frankfurter",
+            ProviderKind::Finnhub => "finnhub",
         }
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
+#[derive(Default)]
 pub enum Side {
     Buy,
+    #[default]
     Sell,
     Mid,
-}
-
-impl Default for Side {
-    fn default() -> Self {
-        Side::Sell
-    }
 }
 
 /// Provider-specific asset shape. A tagged enum keyed by the TOML `provider` field, so a
@@ -84,6 +82,9 @@ pub enum AssetSource {
         base: String,
         quote: String,
     },
+    Finnhub {
+        symbol: String,
+    },
 }
 
 impl AssetSource {
@@ -93,6 +94,7 @@ impl AssetSource {
             AssetSource::Dolarapi { .. } => ProviderKind::DolarApi,
             AssetSource::Stooq { .. } => ProviderKind::Stooq,
             AssetSource::Frankfurter { .. } => ProviderKind::Frankfurter,
+            AssetSource::Finnhub { .. } => ProviderKind::Finnhub,
         }
     }
 
@@ -103,6 +105,7 @@ impl AssetSource {
             AssetSource::Dolarapi { casa, side } => format!("da:{casa}:{side:?}"),
             AssetSource::Stooq { symbol } => format!("st:{symbol}"),
             AssetSource::Frankfurter { base, quote } => format!("fx:{base}:{quote}"),
+            AssetSource::Finnhub { symbol } => format!("fh:{symbol}"),
         }
     }
 }

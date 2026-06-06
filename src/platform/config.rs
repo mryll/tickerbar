@@ -6,15 +6,11 @@ use crate::platform::model::Asset;
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq)]
 #[serde(rename_all = "lowercase")]
+#[derive(Default)]
 pub enum DisplayMode {
+    #[default]
     Fixed,
     Rotate,
-}
-
-impl Default for DisplayMode {
-    fn default() -> Self {
-        DisplayMode::Fixed
-    }
 }
 
 #[derive(Debug, Clone, Deserialize)]

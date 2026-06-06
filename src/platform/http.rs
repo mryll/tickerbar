@@ -25,10 +25,22 @@ impl Http {
     }
 
     pub fn get(&self, url: &str) -> Result<String, FetchError> {
+        self.get_with_header(url, None)
+    }
+
+    /// GET with an optional `(header_name, header_value)`. Used to pass secret tokens via a
+    /// header instead of the URL, so the value never lands in error strings or logs.
+    pub fn get_with_header(
+        &self,
+        url: &str,
+        header: Option<(&str, &str)>,
+    ) -> Result<String, FetchError> {
         let target = self.resolve(url);
-        let resp = self
-            .client
-            .get(&target)
+        let mut req = self.client.get(&target);
+        if let Some((name, value)) = header {
+            req = req.header(name, value);
+        }
+        let resp = req
             .send()
             .map_err(|e| FetchError::Other(format!("request failed: {e}")))?;
         let status = resp.status();

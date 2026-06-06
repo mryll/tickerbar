@@ -84,7 +84,7 @@ mod tests {
     #[test]
     fn a_close_price_is_parsed_from_the_csv_row() {
         let body = include_str!("../../tests/fixtures/stooq_ok.csv");
-        let assets = vec![asset("aapl.us")];
+        let assets = [asset("aapl.us")];
         let refs: Vec<&Asset> = assets.iter().collect();
         let qs = parse(body, &refs, Utc::now());
         assert_eq!(qs[0].price, Some(201.5));
@@ -93,7 +93,7 @@ mod tests {
     #[test]
     fn an_nd_row_is_treated_as_missing() {
         let body = include_str!("../../tests/fixtures/stooq_ok.csv");
-        let assets = vec![asset("spy.us")];
+        let assets = [asset("spy.us")];
         let refs: Vec<&Asset> = assets.iter().collect();
         let qs = parse(body, &refs, Utc::now());
         assert_eq!(qs[0].state, QuoteState::Missing);

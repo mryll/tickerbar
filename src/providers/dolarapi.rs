@@ -91,7 +91,7 @@ mod tests {
     #[test]
     fn the_blue_dollar_sell_side_is_read_from_the_response() {
         let body = include_str!("../../tests/fixtures/dolarapi_ok.json");
-        let assets = vec![asset("blue", Side::Sell)];
+        let assets = [asset("blue", Side::Sell)];
         let refs: Vec<&Asset> = assets.iter().collect();
         let qs = parse(body, &refs, Utc::now());
         assert_eq!(qs[0].price, Some(1030.0));
@@ -103,7 +103,7 @@ mod tests {
     #[test]
     fn the_buy_side_reads_compra() {
         let body = include_str!("../../tests/fixtures/dolarapi_ok.json");
-        let assets = vec![asset("blue", Side::Buy)];
+        let assets = [asset("blue", Side::Buy)];
         let refs: Vec<&Asset> = assets.iter().collect();
         let qs = parse(body, &refs, Utc::now());
         assert_eq!(qs[0].price, Some(1010.0));
@@ -112,7 +112,7 @@ mod tests {
     #[test]
     fn an_unknown_casa_is_missing() {
         let body = include_str!("../../tests/fixtures/dolarapi_ok.json");
-        let assets = vec![asset("cripto", Side::Sell)];
+        let assets = [asset("cripto", Side::Sell)];
         let refs: Vec<&Asset> = assets.iter().collect();
         let qs = parse(body, &refs, Utc::now());
         assert_eq!(qs[0].state, QuoteState::Missing);

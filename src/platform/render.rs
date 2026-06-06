@@ -76,6 +76,7 @@ fn group_title(k: ProviderKind) -> &'static str {
         ProviderKind::DolarApi => "Fiat · ARS",
         ProviderKind::Stooq => "Stocks",
         ProviderKind::Frankfurter => "Forex",
+        ProviderKind::Finnhub => "Stocks",
     }
 }
 
@@ -105,7 +106,7 @@ fn visible<'a>(quotes: &'a [Quote], d: &Display, epoch: u64) -> Vec<&'a Quote> {
 }
 
 pub fn bar_text(quotes: &[Quote], d: &Display, epoch: u64) -> String {
-    let icons = IconSet::from_str(&d.icons);
+    let icons = IconSet::from_name(&d.icons);
     visible(quotes, d, epoch)
         .iter()
         .map(|q| render_one(q, &d.bar_format, &icons))
@@ -189,6 +190,7 @@ fn build_tooltip(
         ProviderKind::CoinGecko,
         ProviderKind::DolarApi,
         ProviderKind::Stooq,
+        ProviderKind::Finnhub,
         ProviderKind::Frankfurter,
     ];
     let mut rows: Vec<String> = Vec::new();

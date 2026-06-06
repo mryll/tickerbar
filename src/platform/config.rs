@@ -25,6 +25,9 @@ pub struct Display {
     pub icons: String,
     #[serde(default = "default_bar_format")]
     pub bar_format: String,
+    /// Wrap the tooltip into multiple columns every N lines. 0 = single column.
+    #[serde(default)]
+    pub tooltip_rows_per_column: usize,
 }
 
 fn default_rotate_interval() -> u64 {
@@ -48,6 +51,7 @@ impl Default for Display {
             max_on_bar: default_max_on_bar(),
             icons: default_icons(),
             bar_format: default_bar_format(),
+            tooltip_rows_per_column: 0,
         }
     }
 }

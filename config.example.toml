@@ -11,6 +11,7 @@ max_on_bar = 3          # assets shown on the bar (fixed mode)
 icons = "nerd"          # "nerd" | "emoji" | "ascii"
 # Bar placeholders: {label} {price} {change_pct} {arrow} {glyph}
 bar_format = "{glyph} {label} {price} {arrow}{change_pct}"
+tooltip_rows_per_column = 0   # wrap the tooltip into a new column every N lines (0 = single)
 
 [[asset]]
 label = "BTC"
@@ -47,6 +48,26 @@ label = "EUR/USD"
 provider = "frankfurter"
 base = "eur"
 quote = "usd"
+
+# Argentine market (BYMA) via data912 — no API key, ARS, ~2h delay.
+# panel: acciones | bonos | cedears | corp
+[[asset]]
+label = "ALUA"
+provider = "data912"
+panel = "acciones"
+symbol = "ALUA"
+
+[[asset]]
+label = "GD35"
+provider = "data912"
+panel = "bonos"
+symbol = "GD35"
+
+[[asset]]
+label = "MELI"
+provider = "data912"
+panel = "cedears"
+symbol = "MELI"
 
 # Stocks / indices via CNBC — no API key.
 [[asset]]

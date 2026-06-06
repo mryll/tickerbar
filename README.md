@@ -20,6 +20,8 @@ A price ticker widget for [Waybar](https://github.com/Alexays/Waybar): crypto, t
 - Argentine dollar: oficial, blue, MEP/bolsa, CCL, etc. (DolarAPI), buy/sell/mid side
 - Forex pairs (Frankfurter v2)
 - Stocks/indices with no key via CNBC (`AAPL`, `.SPX`); optional Finnhub with a free key
+- Argentine market (BYMA) with no key via data912 — acciones, bonos, CEDEARs, ONs (in ARS)
+- Multi-column tooltip (`tooltip_rows_per_column`) so large watchlists wrap instead of growing tall
 - Compact bar with a configurable format, or opt-in rotating "ticker-tape" mode
 - Per-provider caching with TTLs and rate-limit (HTTP 429) backoff
 - CSS classes for bar styling: lifecycle (`ok`/`partial`/`stale`/`error`) + direction (`up`/`down`/`flat`/`mixed`)
@@ -94,6 +96,7 @@ quote = "usd"
 | `dolarapi` | Argentine peso | No | `casa` + `side`. Uses the provider's own update timestamp. |
 | `frankfurter` | Forex | No | `base` + `quote`. Reference rates (daily). |
 | `cnbc` | Stocks/indices | No | `symbol` — plain ticker (`AAPL`) or index with a leading dot (`.SPX`, `.IXIC`, `.DJI`). |
+| `data912` | Argentine market (BYMA) | No | `panel` (`acciones`/`bonos`/`cedears`/`corp`) + `symbol` (e.g. `ALUA`, `GD35`, `MELI`). ARS, ~2h delay. |
 | `finnhub` | Stocks/indices | Yes (free) | `symbol`. Token via `FINNHUB_TOKEN` env var. |
 | `stooq` | Stocks/indices | No | `symbol` (e.g. `aapl.us`). Best-effort; often anti-bot-walled → `n/d`. |
 

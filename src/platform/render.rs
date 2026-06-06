@@ -1,8 +1,10 @@
+use std::collections::HashMap;
+
 use chrono::{DateTime, Duration, Utc};
 
 use crate::platform::config::{Config, Display, DisplayMode};
 use crate::platform::icons::IconSet;
-use crate::platform::model::{Direction, ProviderKind, Quote, QuoteState};
+use crate::platform::model::{Asset, AssetSource, Direction, Panel, Quote, QuoteState};
 use crate::platform::theme::ThemeColors;
 use crate::platform::waybar::{self, WaybarOutput};
 
@@ -68,17 +70,6 @@ fn pad_left(s: &str, width: usize) -> String {
 fn pad_right(s: &str, width: usize) -> String {
     let pad = width.saturating_sub(waybar::visible_len(s));
     format!("{}{}", s, " ".repeat(pad))
-}
-
-fn group_title(k: ProviderKind) -> &'static str {
-    match k {
-        ProviderKind::CoinGecko => "Crypto",
-        ProviderKind::DolarApi => "Fiat · ARS",
-        ProviderKind::Stooq => "Stocks",
-        ProviderKind::Frankfurter => "Forex",
-        ProviderKind::Finnhub => "Stocks",
-        ProviderKind::Cnbc => "Stocks",
-    }
 }
 
 fn render_one(q: &Quote, fmt: &str, icons: &IconSet, colors: &ThemeColors) -> String {
@@ -176,10 +167,7 @@ pub fn build(
     let vis = visible(quotes, &cfg.display, epoch);
     let text = bar_text(quotes, &cfg.display, epoch, colors);
     let class = module_class(quotes, &vis);
-    // Tooltip ALWAYS uses the Nerd icon set for consistent monospace alignment, regardless
-    // of the configured bar icon set (Pango renders emoji from a different font with
-    // different metrics, breaking box/column alignment). Same rule meteobar uses.
-    let tooltip = build_tooltip(quotes, colors, &IconSet::Nerd, now);
+    let tooltip = build_tooltip(&cfg.assets, quotes, &cfg.display, colors, now);
     WaybarOutput {
         text,
         tooltip,
@@ -188,15 +176,98 @@ pub fn build(
     }
 }
 
-/// Column-aligned, class-grouped, framed tooltip.
+// ---- Tooltip ---------------------------------------------------------------------------
+
+/// Tooltip section. Derived from the asset's source (see `group_of`), so the same display
+/// grouping is NOT stored in cached market data.
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+enum TooltipGroup {
+    Crypto,
+    FiatArs,
+    AccionesAr,
+    Bonos,
+    Cedears,
+    On,
+    Stocks,
+    Forex,
+}
+
+const GROUP_ORDER: [TooltipGroup; 8] = [
+    TooltipGroup::Crypto,
+    TooltipGroup::FiatArs,
+    TooltipGroup::AccionesAr,
+    TooltipGroup::Bonos,
+    TooltipGroup::Cedears,
+    TooltipGroup::On,
+    TooltipGroup::Stocks,
+    TooltipGroup::Forex,
+];
+
+impl TooltipGroup {
+    fn label(self) -> &'static str {
+        match self {
+            TooltipGroup::Crypto => "Crypto",
+            TooltipGroup::FiatArs => "Fiat · ARS",
+            TooltipGroup::AccionesAr => "Acciones AR",
+            TooltipGroup::Bonos => "Bonos",
+            TooltipGroup::Cedears => "CEDEARs",
+            TooltipGroup::On => "ON",
+            TooltipGroup::Stocks => "Stocks",
+            TooltipGroup::Forex => "Forex",
+        }
+    }
+    fn glyph(self) -> &'static str {
+        match self {
+            TooltipGroup::Crypto => "\u{f15a}",     // bitcoin
+            TooltipGroup::FiatArs => "\u{f155}",    // dollar
+            TooltipGroup::AccionesAr => "\u{f201}", // line chart
+            TooltipGroup::Bonos => "\u{f0d6}",      // money
+            TooltipGroup::Cedears => "\u{f0ac}",    // globe
+            TooltipGroup::On => "\u{f1ad}",         // building
+            TooltipGroup::Stocks => "\u{f201}",     // line chart
+            TooltipGroup::Forex => "\u{f0ec}",      // exchange
+        }
+    }
+}
+
+fn group_of(src: &AssetSource) -> TooltipGroup {
+    match src {
+        AssetSource::Coingecko { .. } => TooltipGroup::Crypto,
+        AssetSource::Dolarapi { .. } => TooltipGroup::FiatArs,
+        AssetSource::Stooq { .. } | AssetSource::Finnhub { .. } | AssetSource::Cnbc { .. } => {
+            TooltipGroup::Stocks
+        }
+        AssetSource::Frankfurter { .. } => TooltipGroup::Forex,
+        AssetSource::Data912 { panel, .. } => match panel {
+            Panel::Acciones => TooltipGroup::AccionesAr,
+            Panel::Bonos => TooltipGroup::Bonos,
+            Panel::Cedears => TooltipGroup::Cedears,
+            Panel::Corp => TooltipGroup::On,
+        },
+    }
+}
+
+enum TooltipLine {
+    Header {
+        group: TooltipGroup,
+        continued: bool,
+    },
+    Row {
+        group: TooltipGroup,
+        text: String,
+    },
+}
+
+/// Column-aligned, class-grouped, optionally multi-column framed tooltip.
 fn build_tooltip(
+    assets: &[Asset],
     quotes: &[Quote],
+    display: &Display,
     colors: &ThemeColors,
-    icons: &IconSet,
     now: DateTime<Utc>,
 ) -> String {
-    // Column widths from PLAIN cell text (Pango tags don't occupy cells; pad_* measure
-    // visible width, so plain widths align the colored cells).
+    // Inner data-column widths are GLOBAL (computed across all quotes) so every data row is
+    // uniform regardless of which tooltip-column it lands in.
     let label_w = quotes
         .iter()
         .map(|q| waybar::visible_len(&waybar::pango_escape(&q.label)))
@@ -213,80 +284,136 @@ fn build_tooltip(
         .max()
         .unwrap_or(0);
 
-    // Group by asset CLASS (so e.g. Stooq + Finnhub share one "Stocks" section), in a
-    // fixed class order. Config order is preserved within each class.
-    let classes = ["Crypto", "Fiat · ARS", "Stocks", "Forex"];
-    let mut rows: Vec<String> = Vec::new();
-    for class in classes {
-        let group: Vec<&Quote> = quotes
-            .iter()
-            .filter(|q| group_title(q.source) == class)
-            .collect();
-        if group.is_empty() {
-            continue;
-        }
-        // Show the per-row source tag only when a class mixes providers (e.g. stooq+finnhub).
-        let multi = group
-            .iter()
-            .map(|q| q.source)
-            .collect::<std::collections::BTreeSet<_>>()
-            .len()
-            > 1;
-        rows.push(format!(
-            "  {} {}",
-            waybar::fg(&colors.accent, icons.kind_glyph(group[0].source)),
-            waybar::bold_fg(&colors.text, class)
-        ));
-        for q in &group {
-            rows.push(render_row(
-                q, label_w, price_w, change_w, now, colors, multi,
-            ));
+    // Distinct sources per group (config order), shown dim next to the section title.
+    let mut group_sources: HashMap<TooltipGroup, Vec<&'static str>> = HashMap::new();
+    for (a, q) in assets.iter().zip(quotes) {
+        let v = group_sources.entry(group_of(&a.source)).or_default();
+        let s = q.source.as_str();
+        if !v.contains(&s) {
+            v.push(s);
         }
     }
 
-    let title = waybar::bold_fg(&colors.accent, "tickerbar");
-    let footer_order = [
-        ProviderKind::CoinGecko,
-        ProviderKind::DolarApi,
-        ProviderKind::Stooq,
-        ProviderKind::Finnhub,
-        ProviderKind::Cnbc,
-        ProviderKind::Frankfurter,
-    ];
-    let sources: Vec<&str> = footer_order
+    // Flat list of structured lines, grouped by section in a fixed order.
+    let mut lines: Vec<TooltipLine> = Vec::new();
+    for group in GROUP_ORDER {
+        let members: Vec<&Quote> = assets
+            .iter()
+            .zip(quotes)
+            .filter(|(a, _)| group_of(&a.source) == group)
+            .map(|(_, q)| q)
+            .collect();
+        if members.is_empty() {
+            continue;
+        }
+        lines.push(TooltipLine::Header {
+            group,
+            continued: false,
+        });
+        for q in members {
+            lines.push(TooltipLine::Row {
+                group,
+                text: render_row(q, label_w, price_w, change_w, now, colors),
+            });
+        }
+    }
+    if lines.is_empty() {
+        lines.push(TooltipLine::Row {
+            group: TooltipGroup::Crypto,
+            text: waybar::fg(&colors.dim, "    no assets configured"),
+        });
+    }
+
+    // Split into columns if configured.
+    let n = display.tooltip_rows_per_column;
+    let columns: Vec<Vec<TooltipLine>> = if n == 0 || lines.len() <= n {
+        vec![lines]
+    } else {
+        chunk_columns(lines, n)
+    };
+
+    // Render each column to padded strings, then join side-by-side.
+    let render_line = |l: &TooltipLine| match l {
+        TooltipLine::Header { group, continued } => {
+            render_header(*group, *continued, &group_sources, colors)
+        }
+        TooltipLine::Row { text, .. } => text.clone(),
+    };
+    let col_strs: Vec<Vec<String>> = columns
         .iter()
-        .filter(|k| quotes.iter().any(|q| q.source == **k))
-        .map(|k| k.as_str())
+        .map(|c| c.iter().map(&render_line).collect())
         .collect();
+    let col_widths: Vec<usize> = col_strs
+        .iter()
+        .map(|c| c.iter().map(|s| waybar::visible_len(s)).max().unwrap_or(0))
+        .collect();
+    let height = col_strs.iter().map(|c| c.len()).max().unwrap_or(0);
+    let sep = waybar::fg(&colors.dim, " │ ");
+
+    let mut grid: Vec<String> = Vec::with_capacity(height);
+    for r in 0..height {
+        let cells: Vec<String> = col_strs
+            .iter()
+            .enumerate()
+            .map(|(ci, col)| {
+                pad_right(col.get(r).map(|s| s.as_str()).unwrap_or(""), col_widths[ci])
+            })
+            .collect();
+        grid.push(cells.join(&sep));
+    }
+
+    // Frame.
+    let title = waybar::bold_fg(&colors.accent, "tickerbar");
     let local = now.with_timezone(&chrono::Local);
     let footer = waybar::fg(
         &colors.dim,
-        &format!(
-            "  \u{f017}  {} · {}",
-            local.format("%H:%M"),
-            sources.join("·")
-        ),
+        &format!("  \u{f017}  Updated {}", local.format("%H:%M")),
     );
-
-    let mut measurable: Vec<&str> = rows.iter().map(|s| s.as_str()).collect();
+    let mut measurable: Vec<&str> = grid.iter().map(|s| s.as_str()).collect();
     measurable.push(footer.as_str());
     let width = waybar::content_width(&measurable).max(waybar::visible_len(&title));
 
-    let mut lines = vec![waybar::top_border(width, &colors.border)];
+    let mut out = vec![waybar::top_border(width, &colors.border)];
     let left = width.saturating_sub(waybar::visible_len(&title)) / 2;
-    lines.push(waybar::border_line(
+    out.push(waybar::border_line(
         &format!("{}{}", " ".repeat(left), title),
         width,
         &colors.border,
     ));
-    lines.push(waybar::separator(width, &colors.border, &colors.dim));
-    for r in &rows {
-        lines.push(waybar::border_line(r, width, &colors.border));
+    out.push(waybar::separator(width, &colors.border, &colors.dim));
+    for g in &grid {
+        out.push(waybar::border_line(g, width, &colors.border));
     }
-    lines.push(waybar::separator(width, &colors.border, &colors.dim));
-    lines.push(waybar::border_line(&footer, width, &colors.border));
-    lines.push(waybar::bottom_border(width, &colors.border));
-    lines.join("\n")
+    out.push(waybar::separator(width, &colors.border, &colors.dim));
+    out.push(waybar::border_line(&footer, width, &colors.border));
+    out.push(waybar::bottom_border(width, &colors.border));
+    out.join("\n")
+}
+
+fn render_header(
+    group: TooltipGroup,
+    continued: bool,
+    sources: &HashMap<TooltipGroup, Vec<&'static str>>,
+    colors: &ThemeColors,
+) -> String {
+    let src = sources.get(&group).map(|v| v.join("·")).unwrap_or_default();
+    let src_part = if src.is_empty() {
+        String::new()
+    } else {
+        waybar::fg(&colors.dim, &format!(" ({src})"))
+    };
+    let cont_part = if continued {
+        waybar::fg(&colors.dim, " (cont.)")
+    } else {
+        String::new()
+    };
+    format!(
+        "  {} {}{}{}",
+        waybar::fg(&colors.accent, group.glyph()),
+        waybar::bold_fg(&colors.text, group.label()),
+        src_part,
+        cont_part
+    )
 }
 
 fn render_row(
@@ -296,7 +423,6 @@ fn render_row(
     change_w: usize,
     now: DateTime<Utc>,
     colors: &ThemeColors,
-    show_source: bool,
 ) -> String {
     let dir_color = match q.direction {
         Some(Direction::Up) => &colors.green,
@@ -314,24 +440,59 @@ fn render_row(
     } else {
         pad_left(&waybar::fg(dir_color, &change_plain), change_w)
     };
-    let mut tail = String::new();
-    if show_source {
-        tail.push_str(&format!("  · {}", q.source.as_str()));
-    }
-    match q.state {
-        QuoteState::Stale => tail.push_str(&format!(
-            "  (stale {})",
-            fmt_age(now.signed_duration_since(q.fetched_at))
-        )),
-        QuoteState::Missing | QuoteState::Error => tail.push_str("  (n/d)"),
-        QuoteState::Fresh => {}
-    }
-    let note = if tail.is_empty() {
-        String::new()
-    } else {
-        waybar::fg(&colors.dim, &tail)
+    let note = match q.state {
+        QuoteState::Stale => waybar::fg(
+            &colors.dim,
+            &format!(
+                "  (stale {})",
+                fmt_age(now.signed_duration_since(q.fetched_at))
+            ),
+        ),
+        QuoteState::Missing | QuoteState::Error => waybar::fg(&colors.dim, "  (n/d)"),
+        QuoteState::Fresh => String::new(),
     };
     format!("    {}  {}  {}{}", label, price, change, note)
+}
+
+/// Split lines into columns of ~`n` lines, avoiding a column that ends on a section header
+/// and inserting a `(cont.)` header when a section spills into the next column.
+fn chunk_columns(lines: Vec<TooltipLine>, n: usize) -> Vec<Vec<TooltipLine>> {
+    let mut cols: Vec<Vec<TooltipLine>> = Vec::new();
+    let mut cur: Vec<TooltipLine> = Vec::new();
+    for l in lines {
+        if cur.len() >= n {
+            cols.push(std::mem::take(&mut cur));
+        }
+        cur.push(l);
+    }
+    if !cur.is_empty() {
+        cols.push(cur);
+    }
+    // A column must not end on a header — push a trailing header to the next column.
+    let last = cols.len().saturating_sub(1);
+    for i in 0..last {
+        if matches!(cols[i].last(), Some(TooltipLine::Header { .. })) {
+            let h = cols[i].pop().unwrap();
+            cols[i + 1].insert(0, h);
+        }
+    }
+    // A column that starts mid-section gets a continuation header.
+    for col in cols.iter_mut().skip(1) {
+        let cont_group = match col.first() {
+            Some(TooltipLine::Row { group, .. }) => Some(*group),
+            _ => None,
+        };
+        if let Some(group) = cont_group {
+            col.insert(
+                0,
+                TooltipLine::Header {
+                    group,
+                    continued: true,
+                },
+            );
+        }
+    }
+    cols
 }
 
 #[cfg(test)]
@@ -365,6 +526,7 @@ mod tests {
             max_on_bar: max,
             icons: "ascii".into(),
             bar_format: "{label} {price} {arrow}".into(),
+            tooltip_rows_per_column: 0,
         }
     }
 
@@ -461,6 +623,21 @@ mod tests {
 
     #[test]
     fn the_tooltip_groups_assets_by_class_with_crypto_before_stocks() {
+        let assets = vec![
+            Asset {
+                label: "BTC".into(),
+                source: AssetSource::Coingecko {
+                    id: "bitcoin".into(),
+                    quote: "usd".into(),
+                },
+            },
+            Asset {
+                label: "AAPL".into(),
+                source: AssetSource::Stooq {
+                    symbol: "aapl.us".into(),
+                },
+            },
+        ];
         let qs = vec![
             quote("BTC", Some(68000.0), Some(Direction::Up), QuoteState::Fresh),
             Quote {
@@ -468,10 +645,101 @@ mod tests {
                 ..quote("AAPL", Some(201.5), None, QuoteState::Fresh)
             },
         ];
-        let tip = build_tooltip(&qs, &ThemeColors::default(), &IconSet::Nerd, Utc::now());
+        let tip = build_tooltip(
+            &assets,
+            &qs,
+            &disp(DisplayMode::Fixed, 3),
+            &ThemeColors::default(),
+            Utc::now(),
+        );
         let crypto_at = tip.find("Crypto").expect("Crypto header");
         let stocks_at = tip.find("Stocks").expect("Stocks header");
         assert!(crypto_at < stocks_at);
         assert!(tip.contains("68,000.00"));
+        // source shown next to the panel title (dim), not a footer source list
+        assert!(tip.contains("coingecko"));
+        assert!(tip.contains("Updated"));
+    }
+
+    // ---- multi-column helpers ----
+
+    fn header(g: TooltipGroup) -> TooltipLine {
+        TooltipLine::Header {
+            group: g,
+            continued: false,
+        }
+    }
+    fn row(g: TooltipGroup) -> TooltipLine {
+        TooltipLine::Row {
+            group: g,
+            text: "x".into(),
+        }
+    }
+    fn ends_with_header(col: &[TooltipLine]) -> bool {
+        matches!(col.last(), Some(TooltipLine::Header { .. }))
+    }
+
+    #[test]
+    fn a_column_never_ends_on_a_header() {
+        // naive chunk of [R,R,H,R] by 3 would put H last in column 0.
+        let lines = vec![
+            row(TooltipGroup::Crypto),
+            row(TooltipGroup::Crypto),
+            header(TooltipGroup::Stocks),
+            row(TooltipGroup::Stocks),
+        ];
+        let cols = chunk_columns(lines, 3);
+        assert!(cols.iter().all(|c| !ends_with_header(c)));
+    }
+
+    #[test]
+    fn a_section_split_across_columns_gets_a_continuation_header() {
+        // [H, R, R, R] by 2 -> column 1 starts mid-section -> gets a continued header.
+        let lines = vec![
+            header(TooltipGroup::On),
+            row(TooltipGroup::On),
+            row(TooltipGroup::On),
+            row(TooltipGroup::On),
+        ];
+        let cols = chunk_columns(lines, 2);
+        assert!(cols.len() >= 2);
+        assert!(matches!(
+            cols[1].first(),
+            Some(TooltipLine::Header {
+                continued: true,
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn all_tooltip_lines_have_equal_visible_width() {
+        let assets: Vec<Asset> = (0..10)
+            .map(|i| Asset {
+                label: format!("SYM{i}"),
+                source: AssetSource::Cnbc {
+                    symbol: format!("S{i}"),
+                },
+            })
+            .collect();
+        let qs: Vec<Quote> = (0..10)
+            .map(|i| Quote {
+                source: ProviderKind::Cnbc,
+                ..quote(
+                    &format!("SYM{i}"),
+                    Some(100.0 + i as f64),
+                    Some(Direction::Up),
+                    QuoteState::Fresh,
+                )
+            })
+            .collect();
+        let mut d = disp(DisplayMode::Fixed, 3);
+        d.tooltip_rows_per_column = 4; // force multiple columns
+        let tip = build_tooltip(&assets, &qs, &d, &ThemeColors::default(), Utc::now());
+        let widths: Vec<usize> = tip.lines().map(waybar::visible_len).collect();
+        assert!(
+            widths.windows(2).all(|w| w[0] == w[1]),
+            "all framed lines equal width"
+        );
     }
 }

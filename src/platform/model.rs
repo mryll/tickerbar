@@ -38,6 +38,7 @@ pub enum ProviderKind {
     Frankfurter,
     Finnhub,
     Cnbc,
+    Data912,
 }
 
 impl ProviderKind {
@@ -49,6 +50,36 @@ impl ProviderKind {
             ProviderKind::Frankfurter => "frankfurter",
             ProviderKind::Finnhub => "finnhub",
             ProviderKind::Cnbc => "cnbc",
+            ProviderKind::Data912 => "data912",
+        }
+    }
+}
+
+/// data912 Argentine market panels, each backed by one endpoint.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Panel {
+    Acciones,
+    Bonos,
+    Cedears,
+    Corp,
+}
+
+impl Panel {
+    pub fn endpoint(self) -> &'static str {
+        match self {
+            Panel::Acciones => "arg_stocks",
+            Panel::Bonos => "arg_bonds",
+            Panel::Cedears => "arg_cedears",
+            Panel::Corp => "arg_corp",
+        }
+    }
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Panel::Acciones => "acciones",
+            Panel::Bonos => "bonos",
+            Panel::Cedears => "cedears",
+            Panel::Corp => "corp",
         }
     }
 }
@@ -90,6 +121,10 @@ pub enum AssetSource {
     Cnbc {
         symbol: String,
     },
+    Data912 {
+        panel: Panel,
+        symbol: String,
+    },
 }
 
 impl AssetSource {
@@ -101,6 +136,7 @@ impl AssetSource {
             AssetSource::Frankfurter { .. } => ProviderKind::Frankfurter,
             AssetSource::Finnhub { .. } => ProviderKind::Finnhub,
             AssetSource::Cnbc { .. } => ProviderKind::Cnbc,
+            AssetSource::Data912 { .. } => ProviderKind::Data912,
         }
     }
 
@@ -113,6 +149,7 @@ impl AssetSource {
             AssetSource::Frankfurter { base, quote } => format!("fx:{base}:{quote}"),
             AssetSource::Finnhub { symbol } => format!("fh:{symbol}"),
             AssetSource::Cnbc { symbol } => format!("cb:{symbol}"),
+            AssetSource::Data912 { panel, symbol } => format!("d9:{}:{symbol}", panel.as_str()),
         }
     }
 }

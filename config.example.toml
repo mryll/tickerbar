@@ -1,0 +1,52 @@
+# tickerbar config — copy to ~/.config/tickerbar/config.toml
+#
+# Stock/index quotes (Stooq) are delayed/best-effort — tickerbar is NOT a live trading
+# feed. Crypto (CoinGecko) and the Argentine dollar (DolarAPI) update more frequently.
+
+[display]
+mode = "fixed"          # "fixed" | "rotate"
+rotate_interval = 5     # seconds per asset (rotate mode only)
+max_on_bar = 3          # assets shown on the bar (fixed mode)
+icons = "nerd"          # "nerd" | "emoji" | "ascii"
+# Bar placeholders: {label} {price} {change_pct} {arrow} {glyph}
+bar_format = "{glyph} {label} {price} {arrow}{change_pct}"
+
+[[asset]]
+label = "BTC"
+provider = "coingecko"
+id = "bitcoin"
+quote = "usd"
+
+[[asset]]
+label = "ETH"
+provider = "coingecko"
+id = "ethereum"
+quote = "usd"
+
+[[asset]]
+label = "Blue"
+provider = "dolarapi"
+casa = "blue"
+side = "sell"           # "buy" | "sell" | "mid"
+
+[[asset]]
+label = "MEP"
+provider = "dolarapi"
+casa = "bolsa"
+side = "sell"
+
+[[asset]]
+label = "AAPL"
+provider = "stooq"
+symbol = "aapl.us"
+
+[[asset]]
+label = "S&P500"
+provider = "stooq"
+symbol = "^spx"
+
+[[asset]]
+label = "EUR/USD"
+provider = "frankfurter"
+base = "eur"
+quote = "usd"

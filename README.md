@@ -38,6 +38,8 @@ The tooltip groups your watchlist by asset class and wraps into columns as it gr
 - Optional intraday low–high range per row (`tooltip_range`) for CNBC-backed assets (stocks, indices, commodities, rates)
 - Market-hours aware: closed markets aren't polled (built-in calendars) and show `⏸ closed`
 - Compact bar with a configurable format, or opt-in rotating "ticker-tape" mode
+- Curated bar subset (`bar`) — choose which assets, and in what order, appear on the bar by label, independently of the full tooltip
+- Optional watchlist summary (`summary_format`) — an equal-weighted average of the change %, with placement controlled by a `bar_layout` template (`{bar}`/`{summary}`)
 - Per-provider caching with TTLs and rate-limit (HTTP 429) backoff
 - CSS classes for bar styling: lifecycle (`ok`/`partial`/`stale`/`error`) + direction (`up`/`down`/`flat`/`mixed`)
 - Nerd Font, emoji, or ASCII icon sets
@@ -82,7 +84,20 @@ rotate_interval = 5     # seconds per asset (rotate mode only)
 max_on_bar = 3          # assets shown on the bar (fixed mode)
 icons = "nerd"          # "nerd" | "emoji" | "ascii"
 # Bar placeholders: {label} {price} {change_pct} {arrow} {glyph}
+# Format strings are Pango markup: literal &, < and > must be escaped (&amp; &lt; &gt;).
 bar_format = "{glyph} {label} {price} {arrow}{change_pct}"
+# Optional summary prepended to the bar (empty = off). Separate template with its own
+# placeholders: {avg_change} {avg_arrow}. It is the equal-weighted mean of each asset's
+# daily change %; assets with no daily change (some FX/dólar/Stooq quotes) are excluded.
+# Averaging heterogeneous markets is a "watchlist mood", not a real portfolio return.
+summary_format = ""     # e.g. "Σ {avg_arrow}{avg_change}"
+# Curated subset shown on the bar, by label, in this order. Empty = all assets (config order).
+# The tooltip is unaffected (always all assets, config order). Unknown labels are ignored.
+bar = []                # e.g. ["BTC", "Blue", "S&P500"]
+# Layout combining the assets block {bar} and the summary block {summary}. Default puts the
+# summary first; e.g. "{bar}   {summary}" puts it at the end. When one block is empty its
+# surrounding literals are dropped, so an empty summary never leaves a dangling separator.
+bar_layout = "{summary}   {bar}"
 
 [[asset]]
 label = "BTC"

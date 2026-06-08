@@ -25,6 +25,17 @@ pub struct Display {
     pub icons: String,
     #[serde(default = "default_bar_format")]
     pub bar_format: String,
+    /// Optional bar-level summary prepended to the bar text. Empty = off.
+    /// Placeholders: {avg_change} {avg_arrow}. See `render::render_summary`.
+    #[serde(default)]
+    pub summary_format: String,
+    /// Curated, ordered subset of asset labels shown on the bar. Empty = all assets (config order).
+    /// Does not affect the tooltip.
+    #[serde(default)]
+    pub bar: Vec<String>,
+    /// Layout template combining the assets block and the summary block. Placeholders: {bar} {summary}.
+    #[serde(default = "default_bar_layout")]
+    pub bar_layout: String,
     /// Wrap the tooltip into multiple columns every N lines. 0 = single column.
     #[serde(default)]
     pub tooltip_rows_per_column: usize,
@@ -50,6 +61,9 @@ fn default_icons() -> String {
 fn default_bar_format() -> String {
     "{label} {price} {arrow}{change_pct}".into()
 }
+fn default_bar_layout() -> String {
+    "{summary}   {bar}".into()
+}
 
 impl Default for Display {
     fn default() -> Self {
@@ -59,6 +73,9 @@ impl Default for Display {
             max_on_bar: default_max_on_bar(),
             icons: default_icons(),
             bar_format: default_bar_format(),
+            summary_format: String::new(),
+            bar: Vec::new(),
+            bar_layout: default_bar_layout(),
             tooltip_rows_per_column: 0,
             tooltip_max_columns: 0,
             tooltip_range: false,
@@ -186,6 +203,30 @@ side = "sell"
         assert_eq!(cfg.assets.len(), 2);
         assert_eq!(cfg.display.max_on_bar, 2);
         assert!(matches!(cfg.display.mode, DisplayMode::Fixed));
+    }
+
+    #[test]
+    fn summary_format_defaults_to_empty_and_parses_from_toml() {
+        assert_eq!(Display::default().summary_format, "");
+        let cfg = Config::parse_str(
+            "[display]\nsummary_format = \"Σ {avg_arrow}{avg_change}\"\n\
+             [[asset]]\nlabel = \"BTC\"\nprovider = \"coingecko\"\nid = \"bitcoin\"\nquote = \"usd\"\n",
+        )
+        .unwrap();
+        assert_eq!(cfg.display.summary_format, "Σ {avg_arrow}{avg_change}");
+    }
+
+    #[test]
+    fn bar_and_bar_layout_have_sensible_defaults_and_parse() {
+        assert!(Display::default().bar.is_empty());
+        assert_eq!(Display::default().bar_layout, "{summary}   {bar}");
+        let cfg = Config::parse_str(
+            "[display]\nbar = [\"BTC\", \"ETH\"]\nbar_layout = \"{bar} | {summary}\"\n\
+             [[asset]]\nlabel = \"BTC\"\nprovider = \"coingecko\"\nid = \"bitcoin\"\nquote = \"usd\"\n",
+        )
+        .unwrap();
+        assert_eq!(cfg.display.bar, vec!["BTC".to_string(), "ETH".to_string()]);
+        assert_eq!(cfg.display.bar_layout, "{bar} | {summary}");
     }
 
     #[test]

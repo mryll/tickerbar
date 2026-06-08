@@ -10,7 +10,18 @@ rotate_interval = 5     # seconds per asset (rotate mode only)
 max_on_bar = 3          # assets shown on the bar (fixed mode)
 icons = "nerd"          # "nerd" | "emoji" | "ascii"
 # Bar placeholders: {label} {price} {change_pct} {arrow} {glyph}
+# Format strings are Pango markup: literal &, < and > must be escaped (&amp; &lt; &gt;).
 bar_format = "{glyph} {label} {price} {arrow}{change_pct}"
+# Optional summary prepended to the bar (empty = off). Placeholders: {avg_change} {avg_arrow}.
+# Equal-weighted mean of each asset's daily change %; assets with no daily change are excluded.
+# Heterogeneous markets averaged together are a "watchlist mood", not a real portfolio return.
+summary_format = ""           # e.g. "Σ {avg_arrow}{avg_change}"
+# Curated subset shown on the bar, by label, in this order. Empty = all assets (config order).
+# Tooltip is unaffected (always all assets, config order). Unknown labels are ignored.
+bar = []                      # e.g. ["BTC", "Blue", "S&P500"]
+# Layout combining the assets block {bar} and the summary block {summary}. Default = summary
+# first; "{bar}   {summary}" puts it at the end. Empty blocks drop their literals (no dangling sep).
+bar_layout = "{summary}   {bar}"
 tooltip_rows_per_column = 0   # wrap the tooltip into a new column every N lines (0 = single)
 tooltip_max_columns = 0       # cap columns side-by-side; extras wrap into a band below (0 = unlimited)
 tooltip_range = false         # append a dim intraday low–high range per row (CNBC-backed assets)

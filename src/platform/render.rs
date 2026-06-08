@@ -48,6 +48,27 @@ fn fmt_change(c: Option<f64>) -> String {
     }
 }
 
+/// Equal-weight mean of `change_pct` over quotes whose change is `Some` and finite.
+/// Returns `None` when no quote has a usable change (=> the summary segment is omitted) or if
+/// the computed mean is non-finite (overflow guard) — preserves the never-crash invariant.
+fn avg_change_pct(quotes: &[Quote]) -> Option<f64> {
+    let mut sum = 0.0;
+    let mut count = 0u32;
+    for q in quotes {
+        if let Some(v) = q.change_pct {
+            if v.is_finite() {
+                sum += v;
+                count += 1;
+            }
+        }
+    }
+    if count == 0 {
+        return None;
+    }
+    let avg = sum / f64::from(count);
+    avg.is_finite().then_some(avg)
+}
+
 /// Format an asset's value for display. Rates (yields) render as a percent ("4.53%");
 /// every other class uses the currency-style price formatter. Used for BOTH the column-width
 /// measurement and the actual render so yields stay column-aligned.
@@ -117,16 +138,89 @@ fn render_one(
         .to_string()
 }
 
-/// Indices of the assets shown on the bar, per display mode. `epoch` = unix seconds (bucket).
-fn visible_indices(len: usize, d: &Display, epoch: u64) -> Vec<usize> {
+/// Render the bar-level summary segment from the equal-weighted average change %.
+/// Mirrors `render_one`: only the {avg_change}/{avg_arrow} substitutions are colored
+/// (green up / red down); a flat average is left unspanned. Literal text is untouched.
+fn render_summary(avg: f64, fmt: &str, icons: &IconSet, colors: &ThemeColors) -> String {
+    let dir = Direction::from_change(avg);
+    let change_plain = fmt_change(Some(avg));
+    let arrow = icons.arrow(Some(dir));
+    let (arrow_s, change_s) = match dir {
+        Direction::Up => (
+            waybar::fg(&colors.green, arrow),
+            waybar::fg(&colors.green, &change_plain),
+        ),
+        Direction::Down => (
+            waybar::fg(&colors.red, arrow),
+            waybar::fg(&colors.red, &change_plain),
+        ),
+        Direction::Flat => (arrow.to_string(), change_plain),
+    };
+    fmt.replace("{avg_change}", &change_s)
+        .replace("{avg_arrow}", &arrow_s)
+        .trim()
+        .to_string()
+}
+
+/// Replace {bar} and {summary} in `layout` in a single left-to-right pass. Unknown {tokens}
+/// are left verbatim; inserted content is never re-scanned (so a value containing a brace
+/// token cannot be corrupted).
+fn apply_layout(layout: &str, bar: &str, summary: &str) -> String {
+    let mut out = String::with_capacity(layout.len() + bar.len() + summary.len());
+    let mut rest = layout;
+    while let Some(open) = rest.find('{') {
+        out.push_str(&rest[..open]);
+        match rest[open..].find('}') {
+            Some(close) => {
+                let token = &rest[open..=open + close];
+                match token {
+                    "{bar}" => out.push_str(bar),
+                    "{summary}" => out.push_str(summary),
+                    other => out.push_str(other),
+                }
+                rest = &rest[open + close + 1..];
+            }
+            None => {
+                out.push_str(&rest[open..]);
+                rest = "";
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+/// Candidate asset indices for the bar, in display order. `bar` empty => all assets in config
+/// order; otherwise each label resolves to the FIRST matching asset index, in `bar` order,
+/// skipping unknown labels, de-duplicated preserving first occurrence.
+fn bar_candidates(assets: &[Asset], bar: &[String]) -> Vec<usize> {
+    let mut out: Vec<usize> = Vec::new();
+    if bar.is_empty() {
+        out.extend(0..assets.len());
+    } else {
+        for name in bar {
+            if let Some(i) = assets.iter().position(|a| &a.label == name) {
+                if !out.contains(&i) {
+                    out.push(i);
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Asset indices actually shown on the bar, per display mode — the single source of truth for
+/// bar text, module direction class, and the `closed` badge. `epoch` = unix seconds (bucket).
+fn bar_indices(assets: &[Asset], d: &Display, epoch: u64) -> Vec<usize> {
+    let candidates = bar_candidates(assets, &d.bar);
     match d.mode {
-        DisplayMode::Fixed => (0..len).take(d.max_on_bar).collect(),
+        DisplayMode::Fixed => candidates.into_iter().take(d.max_on_bar).collect(),
         DisplayMode::Rotate => {
-            if len == 0 {
+            if candidates.is_empty() {
                 return Vec::new();
             }
             let interval = d.rotate_interval.max(1);
-            vec![((epoch / interval) as usize) % len]
+            vec![candidates[(epoch / interval) as usize % candidates.len()]]
         }
     }
 }
@@ -139,21 +233,37 @@ pub fn bar_text(
     colors: &ThemeColors,
 ) -> String {
     let icons = IconSet::from_name(&d.icons);
-    visible_indices(quotes.len(), d, epoch)
+    let bar = bar_indices(assets, d, epoch)
         .iter()
         .filter_map(|&i| {
-            let a = assets.get(i)?;
-            let q = quotes.get(i)?;
             Some(render_one(
-                q,
-                group_of(&a.source),
+                quotes.get(i)?,
+                group_of(&assets.get(i)?.source),
                 &d.bar_format,
                 &icons,
                 colors,
             ))
         })
         .collect::<Vec<_>>()
-        .join("   ")
+        .join("   ");
+
+    let summary = if d.summary_format.is_empty() {
+        String::new()
+    } else {
+        match avg_change_pct(quotes) {
+            Some(avg) => render_summary(avg, &d.summary_format, &icons, colors),
+            None => String::new(),
+        }
+    };
+
+    // Compose by which block is non-empty: literal separators in `bar_layout` only appear when
+    // both blocks exist, so an empty block never leaves a dangling separator.
+    match (bar.is_empty(), summary.is_empty()) {
+        (true, true) => String::new(),
+        (false, true) => bar,
+        (true, false) => summary,
+        (false, false) => apply_layout(&d.bar_layout, &bar, &summary),
+    }
 }
 
 /// Lifecycle classes from ALL quotes; direction class from the VISIBLE quotes only.
@@ -196,8 +306,8 @@ pub fn build(
     colors: &ThemeColors,
 ) -> WaybarOutput {
     let epoch = now.timestamp().max(0) as u64;
-    let idx = visible_indices(quotes.len(), &cfg.display, epoch);
-    let vis: Vec<&Quote> = idx.iter().map(|&i| &quotes[i]).collect();
+    let idx = bar_indices(&cfg.assets, &cfg.display, epoch);
+    let vis: Vec<&Quote> = idx.iter().filter_map(|&i| quotes.get(i)).collect();
     let text = bar_text(&cfg.assets, quotes, &cfg.display, epoch, colors);
     let mut class = module_class(quotes, &vis);
     // `closed` class when every asset currently on the bar is in a closed market.
@@ -703,14 +813,400 @@ mod tests {
             max_on_bar: max,
             icons: "ascii".into(),
             bar_format: "{label} {price} {arrow}".into(),
+            summary_format: String::new(),
+            bar: Vec::new(),
+            bar_layout: "{summary}   {bar}".into(),
             tooltip_rows_per_column: 0,
             tooltip_max_columns: 0,
             tooltip_range: false,
         }
     }
 
+    // Quote with an explicit change_pct (the `quote()` helper above hardcodes 1.0).
+    fn quote_chg(label: &str, change: Option<f64>) -> Quote {
+        let mut q = quote(
+            label,
+            Some(1.0),
+            change.map(Direction::from_change),
+            QuoteState::Fresh,
+        );
+        q.change_pct = change;
+        q
+    }
+
     fn all_visible(qs: &[Quote]) -> Vec<&Quote> {
         qs.iter().collect()
+    }
+
+    #[test]
+    fn avg_change_is_the_equal_weighted_mean_of_finite_changes() {
+        let qs = vec![
+            quote_chg("A", Some(2.0)),
+            quote_chg("B", Some(-1.0)),
+            quote_chg("C", Some(3.0)),
+        ];
+        assert_eq!(avg_change_pct(&qs), Some((2.0 - 1.0 + 3.0) / 3.0));
+    }
+
+    #[test]
+    fn avg_change_excludes_quotes_without_a_usable_change() {
+        // valid price but change_pct=None (price-only providers like dolarapi/frankfurter/stooq)
+        let qs = vec![
+            quote_chg("A", Some(4.0)),
+            quote_chg("PRICEONLY", None),
+            quote_chg("B", Some(2.0)),
+        ];
+        assert_eq!(avg_change_pct(&qs), Some(3.0));
+    }
+
+    #[test]
+    fn avg_change_is_none_when_no_quote_has_a_change() {
+        assert_eq!(
+            avg_change_pct(&[quote_chg("A", None), quote_chg("B", None)]),
+            None
+        );
+        assert_eq!(avg_change_pct(&[]), None);
+    }
+
+    #[test]
+    fn avg_change_excludes_non_finite_values() {
+        let qs = vec![quote_chg("A", Some(f64::NAN)), quote_chg("B", Some(2.0))];
+        assert_eq!(avg_change_pct(&qs), Some(2.0));
+    }
+
+    #[test]
+    fn the_summary_colors_a_positive_average_green_with_an_up_arrow() {
+        let c = ThemeColors::default();
+        let out = render_summary(0.5, "Σ {avg_arrow}{avg_change}", &IconSet::Ascii, &c);
+        assert!(out.contains("+0.50%"));
+        assert!(out.contains(&c.green));
+        assert!(out.contains('^')); // ascii up arrow
+        assert!(out.starts_with('Σ')); // literal text uncolored
+    }
+
+    #[test]
+    fn the_summary_colors_a_negative_average_red() {
+        let c = ThemeColors::default();
+        let out = render_summary(-0.5, "{avg_arrow}{avg_change}", &IconSet::Ascii, &c);
+        assert!(out.contains("-0.50%"));
+        assert!(out.contains(&c.red));
+        assert!(out.contains('v')); // ascii down arrow
+    }
+
+    #[test]
+    fn a_flat_summary_is_left_unspanned() {
+        let c = ThemeColors::default();
+        let out = render_summary(0.0, "{avg_change}", &IconSet::Ascii, &c);
+        assert_eq!(out, "+0.00%"); // no <span> wrapper
+    }
+
+    #[test]
+    fn the_summary_prefix_appears_before_the_assets_when_configured() {
+        let qs = vec![quote_chg("A", Some(2.0)), quote_chg("B", Some(4.0))];
+        let mut d = disp(DisplayMode::Fixed, 3);
+        d.summary_format = "AVG{avg_change}".into();
+        let text = bar_text(&assets_for(&qs), &qs, &d, 0, &ThemeColors::default());
+        assert!(text.starts_with("AVG"));
+        assert!(text.contains("+3.00%"));
+    }
+
+    #[test]
+    fn an_empty_summary_format_leaves_the_bar_unchanged() {
+        // The body must be byte-identical with vs without the (empty) summary: render the
+        // same input with a summary, and assert the no-summary output is its verbatim tail.
+        let qs = vec![quote_chg("A", Some(2.0)), quote_chg("B", Some(4.0))];
+        let assets = assets_for(&qs);
+        let without = bar_text(
+            &assets,
+            &qs,
+            &disp(DisplayMode::Fixed, 3),
+            0,
+            &ThemeColors::default(),
+        );
+        let mut d = disp(DisplayMode::Fixed, 3);
+        d.summary_format = "AVG{avg_change}".into();
+        let with = bar_text(&assets, &qs, &d, 0, &ThemeColors::default());
+        assert!(!without.contains("AVG"));
+        // The no-summary body must appear verbatim as the tail (unchanged by the feature),
+        // and the summary segment + separator must be the only prefix added.
+        assert!(with.starts_with("AVG"));
+        assert!(with.ends_with(&format!("   {without}")));
+    }
+
+    #[test]
+    fn a_whitespace_only_summary_format_does_not_prepend_a_dangling_separator() {
+        let qs = vec![quote_chg("A", Some(2.0))];
+        let assets = assets_for(&qs);
+        let without = bar_text(
+            &assets,
+            &qs,
+            &disp(DisplayMode::Fixed, 3),
+            0,
+            &ThemeColors::default(),
+        );
+        let mut d = disp(DisplayMode::Fixed, 3);
+        d.summary_format = "   ".into(); // renders empty after trim => must fall back to body
+        let with = bar_text(&assets, &qs, &d, 0, &ThemeColors::default());
+        assert_eq!(with, without);
+    }
+
+    #[test]
+    fn avg_change_excludes_infinities_and_is_none_when_only_infinite() {
+        assert_eq!(avg_change_pct(&[quote_chg("A", Some(f64::INFINITY))]), None);
+        assert_eq!(
+            avg_change_pct(&[
+                quote_chg("A", Some(f64::NEG_INFINITY)),
+                quote_chg("B", Some(2.0))
+            ]),
+            Some(2.0)
+        );
+    }
+
+    #[test]
+    fn a_price_only_watchlist_shows_no_summary_segment() {
+        let qs = vec![quote_chg("A", None)]; // valid price, no change_pct; module would be ok
+        let mut d = disp(DisplayMode::Fixed, 3);
+        d.summary_format = "AVG{avg_change}".into();
+        let text = bar_text(&assets_for(&qs), &qs, &d, 0, &ThemeColors::default());
+        assert!(!text.contains("AVG"));
+    }
+
+    #[test]
+    fn an_empty_body_yields_the_summary_alone_without_a_trailing_separator() {
+        // change 0.0 => flat => unspanned, so the assertion is about whitespace, not color.
+        let qs = vec![quote_chg("A", Some(0.0))];
+        let mut d = disp(DisplayMode::Fixed, 0); // max_on_bar=0 -> no visible assets
+        d.summary_format = "AVG{avg_change}".into();
+        let text = bar_text(&assets_for(&qs), &qs, &d, 0, &ThemeColors::default());
+        assert_eq!(text, "AVG+0.00%"); // no leading/trailing spaces, no dangling separator
+    }
+
+    // ---- bar selection (`bar`) + layout (`bar_layout`) ----
+
+    fn cfg_with(display: Display, qs: &[Quote]) -> Config {
+        Config {
+            display,
+            market_hours: MarketHours::default(),
+            assets: assets_for(qs),
+        }
+    }
+
+    #[test]
+    fn bar_candidates_empty_list_is_all_assets_in_config_order() {
+        let qs = vec![quote_chg("A", Some(1.0)), quote_chg("B", Some(1.0))];
+        assert_eq!(bar_candidates(&assets_for(&qs), &[]), vec![0, 1]);
+    }
+
+    #[test]
+    fn bar_candidates_resolves_labels_in_list_order_skipping_unknown() {
+        let qs = vec![
+            quote_chg("A", Some(1.0)),
+            quote_chg("B", Some(1.0)),
+            quote_chg("C", Some(1.0)),
+        ];
+        let bar = vec!["C".to_string(), "NOPE".to_string(), "A".to_string()];
+        assert_eq!(bar_candidates(&assets_for(&qs), &bar), vec![2, 0]);
+    }
+
+    #[test]
+    fn bar_candidates_deduplicates_repeated_labels_keeping_first() {
+        let qs = vec![quote_chg("A", Some(1.0)), quote_chg("B", Some(1.0))];
+        let bar = vec!["B".to_string(), "B".to_string(), "A".to_string()];
+        assert_eq!(bar_candidates(&assets_for(&qs), &bar), vec![1, 0]);
+    }
+
+    #[test]
+    fn bar_candidates_all_unknown_is_empty() {
+        let qs = vec![quote_chg("A", Some(1.0))];
+        assert!(bar_candidates(&assets_for(&qs), &["X".to_string()]).is_empty());
+    }
+
+    #[test]
+    fn bar_indices_fixed_takes_first_max_on_bar_candidates() {
+        let qs = vec![
+            quote_chg("A", Some(1.0)),
+            quote_chg("B", Some(1.0)),
+            quote_chg("C", Some(1.0)),
+        ];
+        let d = disp(DisplayMode::Fixed, 2);
+        assert_eq!(bar_indices(&assets_for(&qs), &d, 0), vec![0, 1]);
+    }
+
+    #[test]
+    fn bar_indices_fixed_honors_the_bar_subset_order() {
+        let qs = vec![
+            quote_chg("A", Some(1.0)),
+            quote_chg("B", Some(1.0)),
+            quote_chg("C", Some(1.0)),
+        ];
+        let mut d = disp(DisplayMode::Fixed, 3);
+        d.bar = vec!["C".to_string(), "A".to_string()];
+        assert_eq!(bar_indices(&assets_for(&qs), &d, 0), vec![2, 0]);
+    }
+
+    #[test]
+    fn bar_indices_rotate_cycles_only_among_the_subset() {
+        let qs = vec![
+            quote_chg("A", Some(1.0)),
+            quote_chg("B", Some(1.0)),
+            quote_chg("C", Some(1.0)),
+        ];
+        let mut d = disp(DisplayMode::Rotate, 1);
+        d.bar = vec!["A".to_string(), "C".to_string()]; // never B
+        d.rotate_interval = 1;
+        assert_eq!(bar_indices(&assets_for(&qs), &d, 0), vec![0]);
+        assert_eq!(bar_indices(&assets_for(&qs), &d, 1), vec![2]);
+        assert_eq!(bar_indices(&assets_for(&qs), &d, 2), vec![0]); // wraps within {A,C}
+    }
+
+    #[test]
+    fn bar_indices_rotate_with_no_candidates_is_empty() {
+        let qs = vec![quote_chg("A", Some(1.0))];
+        let mut d = disp(DisplayMode::Rotate, 1);
+        d.bar = vec!["NOPE".to_string()];
+        assert!(bar_indices(&assets_for(&qs), &d, 0).is_empty());
+    }
+
+    #[test]
+    fn apply_layout_substitutes_both_blocks() {
+        assert_eq!(apply_layout("{summary}   {bar}", "BAR", "SUM"), "SUM   BAR");
+        assert_eq!(apply_layout("{bar} | {summary}", "BAR", "SUM"), "BAR | SUM");
+    }
+
+    #[test]
+    fn apply_layout_does_not_re_substitute_inserted_content() {
+        // a bar value containing the literal {summary} must survive unchanged (single pass)
+        assert_eq!(apply_layout("{bar}", "x{summary}y", "SUM"), "x{summary}y");
+    }
+
+    #[test]
+    fn apply_layout_leaves_unknown_tokens_verbatim() {
+        assert_eq!(apply_layout("{glyph} {bar}", "BAR", "SUM"), "{glyph} BAR");
+    }
+
+    #[test]
+    fn bar_text_renders_the_subset_in_list_order_only() {
+        let qs = vec![
+            quote_chg("A", Some(1.0)),
+            quote_chg("B", Some(1.0)),
+            quote_chg("C", Some(1.0)),
+        ];
+        let mut d = disp(DisplayMode::Fixed, 3);
+        d.bar = vec!["C".to_string(), "A".to_string()];
+        let text = bar_text(&assets_for(&qs), &qs, &d, 0, &ThemeColors::default());
+        let c = text.find('C').unwrap();
+        let a = text.find('A').unwrap();
+        assert!(c < a, "C must render before A");
+        assert!(!text.contains('B'), "B is not in the bar subset");
+    }
+
+    #[test]
+    fn bar_text_layout_places_summary_after_assets_when_configured() {
+        // +2.00% is positive => wrapped in a color span, so "AVG" and "+2.00%" are NOT
+        // contiguous; assert order + presence, not a contiguous substring.
+        let qs = vec![quote_chg("A", Some(2.0))];
+        let mut d = disp(DisplayMode::Fixed, 3);
+        d.summary_format = "AVG{avg_change}".into();
+        d.bar_layout = "{bar}   {summary}".into();
+        let text = bar_text(&assets_for(&qs), &qs, &d, 0, &ThemeColors::default());
+        assert!(text.contains("+2.00%"));
+        assert!(
+            text.find('A').unwrap() < text.find("AVG").unwrap(),
+            "assets before summary"
+        );
+    }
+
+    #[test]
+    fn bar_text_layout_can_show_summary_only() {
+        let qs = vec![quote_chg("A", Some(2.0))]; // render_one would print price "1.00"
+        let mut d = disp(DisplayMode::Fixed, 3);
+        d.summary_format = "AVG{avg_change}".into();
+        d.bar_layout = "{summary}".into(); // {bar} omitted on purpose
+        let text = bar_text(&assets_for(&qs), &qs, &d, 0, &ThemeColors::default());
+        assert!(text.contains("AVG") && text.contains("+2.00%"));
+        assert!(
+            !text.contains("1.00"),
+            "the asset block must not be rendered"
+        );
+    }
+
+    #[test]
+    fn module_direction_class_reflects_the_bar_subset_not_all_quotes() {
+        let qs = vec![
+            quote_chg("UP1", Some(2.0)),
+            quote_chg("UP2", Some(3.0)),
+            quote_chg("DOWN", Some(-5.0)),
+        ];
+        let mut d = disp(DisplayMode::Fixed, 3);
+        d.bar = vec!["UP1".to_string(), "UP2".to_string()]; // excludes the Down asset
+        let out = build(&cfg_with(d, &qs), &qs, Utc::now(), &ThemeColors::default());
+        assert!(out.class.contains(&"up".to_string()));
+        assert!(!out.class.contains(&"mixed".to_string()));
+    }
+
+    #[test]
+    fn class_follows_selection_even_when_layout_hides_the_bar_text() {
+        let qs = vec![quote_chg("UP1", Some(2.0)), quote_chg("DOWN", Some(-5.0))];
+        let mut d = disp(DisplayMode::Fixed, 3);
+        d.bar = vec!["UP1".to_string()];
+        d.summary_format = "AVG{avg_change}".into();
+        d.bar_layout = "{summary}".into(); // text shows only the summary
+        let out = build(&cfg_with(d, &qs), &qs, Utc::now(), &ThemeColors::default());
+        assert!(out.class.contains(&"up".to_string()));
+    }
+
+    #[test]
+    fn closed_badge_reflects_the_bar_subset() {
+        use chrono::TimeZone;
+        // A CNBC stock (closeable) + a crypto (24/7). 2026-07-02 00:00 UTC = 20:00 EDT => US closed.
+        let assets = vec![
+            Asset {
+                label: "AAPL".to_string(),
+                source: AssetSource::Cnbc {
+                    symbol: "AAPL".to_string(),
+                },
+            },
+            Asset {
+                label: "BTC".to_string(),
+                source: AssetSource::Coingecko {
+                    id: "bitcoin".to_string(),
+                    quote: "usd".to_string(),
+                },
+            },
+        ];
+        let qs = vec![
+            quote("AAPL", Some(1.0), Some(Direction::Up), QuoteState::Fresh),
+            quote("BTC", Some(1.0), Some(Direction::Up), QuoteState::Fresh),
+        ];
+        let now = Utc.with_ymd_and_hms(2026, 7, 2, 0, 0, 0).unwrap();
+        let mk = |bar: Vec<String>| {
+            let mut d = disp(DisplayMode::Fixed, 3);
+            d.bar = bar;
+            Config {
+                display: d,
+                market_hours: MarketHours::default(),
+                assets: assets.clone(),
+            }
+        };
+        // Bar = only the (closed) stock => the whole bar is closed.
+        let only_stock = build(
+            &mk(vec!["AAPL".to_string()]),
+            &qs,
+            now,
+            &ThemeColors::default(),
+        );
+        assert!(only_stock.class.contains(&"closed".to_string()));
+        // No bar subset => BTC (always open) is also on the bar => not all closed.
+        let all = build(&mk(vec![]), &qs, now, &ThemeColors::default());
+        assert!(!all.class.contains(&"closed".to_string()));
+    }
+
+    #[test]
+    fn apply_layout_handles_unclosed_and_stray_braces() {
+        assert_eq!(apply_layout("{bar", "B", "S"), "{bar"); // unclosed token kept verbatim
+        assert_eq!(apply_layout("foo } {bar}", "B", "S"), "foo } B"); // stray close brace
+        assert_eq!(apply_layout("{{bar}}", "B", "S"), "{{bar}}"); // doubled braces => unknown token
+        assert_eq!(apply_layout("{bar}{summary}", "B", "S"), "BS"); // adjacent tokens
     }
 
     #[test]

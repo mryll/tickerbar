@@ -681,7 +681,10 @@ fn build_tooltip(
 
     let body = out.join("\n");
     if frame {
-        format!("<span font_family='JetBrainsMono Nerd Font Mono'>{body}</span>")
+        format!(
+            "<span font_family='{}'>{body}</span>",
+            waybar::pango_escape(&display.frame_font).replace('\'', "&apos;")
+        )
     } else {
         body
     }
@@ -871,6 +874,7 @@ mod tests {
             tooltip_max_columns: 0,
             tooltip_range: false,
             frame: false,
+            frame_font: "JetBrainsMono Nerd Font Mono".into(),
         }
     }
 

@@ -98,9 +98,11 @@ bar = []                # e.g. ["BTC", "Blue", "S&P500"]
 # summary first; e.g. "{bar}   {summary}" puts it at the end. When one block is empty its
 # surrounding literals are dropped, so an empty summary never leaves a dangling separator.
 bar_layout = "{summary}   {bar}"
-# Tooltip frame: draw the bordered box and pin JetBrainsMono Nerd Font Mono so columns
-# stay aligned under any bar font. Off (default) = plain, borderless, renders in your font.
+# Tooltip frame: draw the bordered box and pin a Mono Nerd Font so columns stay aligned
+# under any bar font. Off (default) = plain, borderless, renders in your font.
 frame = false
+# Font pinned when frame = true — must be a complete Mono Nerd Font.
+frame_font = "JetBrainsMono Nerd Font Mono"
 
 [[asset]]
 label = "BTC"

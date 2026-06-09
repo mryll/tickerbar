@@ -52,6 +52,9 @@ pub struct Display {
     /// pin — renders in the user's font; needs no specific font installed.
     #[serde(default)]
     pub frame: bool,
+    /// Font family pinned in framed mode — must be a complete Mono Nerd Font.
+    #[serde(default = "default_frame_font")]
+    pub frame_font: String,
 }
 
 fn default_rotate_interval() -> u64 {
@@ -69,6 +72,9 @@ fn default_bar_format() -> String {
 fn default_bar_layout() -> String {
     "{summary}   {bar}".into()
 }
+fn default_frame_font() -> String {
+    "JetBrainsMono Nerd Font Mono".into()
+}
 
 impl Default for Display {
     fn default() -> Self {
@@ -85,6 +91,7 @@ impl Default for Display {
             tooltip_max_columns: 0,
             tooltip_range: false,
             frame: false,
+            frame_font: default_frame_font(),
         }
     }
 }

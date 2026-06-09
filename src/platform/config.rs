@@ -47,6 +47,11 @@ pub struct Display {
     /// (currently CNBC-backed assets). Off by default to keep the tooltip compact.
     #[serde(default)]
     pub tooltip_range: bool,
+    /// Draw the framed tooltip box and pin `JetBrainsMono Nerd Font Mono` so columns
+    /// stay aligned under any bar font. Off (default) = plain, borderless, no font
+    /// pin — renders in the user's font; needs no specific font installed.
+    #[serde(default)]
+    pub frame: bool,
 }
 
 fn default_rotate_interval() -> u64 {
@@ -79,6 +84,7 @@ impl Default for Display {
             tooltip_rows_per_column: 0,
             tooltip_max_columns: 0,
             tooltip_range: false,
+            frame: false,
         }
     }
 }

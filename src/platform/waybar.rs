@@ -90,7 +90,9 @@ pub fn content_width(items: &[&str]) -> usize {
         .max(MIN_WIDTH)
 }
 
-/// Generic bordered error box for the never-crash fallback paths.
+/// Generic plain error tooltip for the never-crash fallback paths. Rendered
+/// borderless and without a font pin so it displays correctly in any font —
+/// config (and thus the frame preference) may be unavailable on these paths.
 pub fn error_output(
     title: &str,
     message: &str,
@@ -101,13 +103,7 @@ pub fn error_output(
 
     let width = content_width(&[&header, &body]);
 
-    let lines = [
-        top_border(width, &colors.border),
-        border_line(&header, width, &colors.border),
-        separator(width, &colors.border, &colors.dim),
-        border_line(&body, width, &colors.border),
-        bottom_border(width, &colors.border),
-    ];
+    let lines = [header, fg(&colors.dim, &"─".repeat(width)), body];
 
     WaybarOutput {
         text: "?".to_string(),

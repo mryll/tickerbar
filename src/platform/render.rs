@@ -473,6 +473,10 @@ fn build_tooltip(
 ) -> String {
     // fetch_all returns quotes in config order, so assets and quotes stay aligned 1:1.
     debug_assert_eq!(assets.len(), quotes.len());
+    // Framed = box + Mono Nerd Font pin (columns aligned under any bar font). Plain
+    // (default) = no border/pin, and chrome glyphs (group/closed/clock) are dropped
+    // so nothing in measured/columnar content depends on Nerd glyph metrics.
+    let frame = display.frame;
     // Inner data-column widths are GLOBAL (computed across all quotes) so every data row is
     // uniform regardless of which tooltip-column it lands in.
     let label_w = quotes
@@ -561,6 +565,7 @@ fn build_tooltip(
             group_closed.get(group).copied().unwrap_or(false),
             &group_sources,
             colors,
+            frame,
         ),
         TooltipLine::Row { text, .. } => text.clone(),
     };
@@ -568,7 +573,12 @@ fn build_tooltip(
         .iter()
         .map(|c| c.iter().map(&render_line).collect())
         .collect();
-    let sep = waybar::fg(&colors.dim, " │ ");
+    // Plain mode uses spaces (same 3-cell gap) instead of the box-drawing divider.
+    let sep = if frame {
+        waybar::fg(&colors.dim, " │ ")
+    } else {
+        "   ".to_string()
+    };
     // Cap columns per band; extra columns wrap into a new band stacked below (narrow/vertical
     // monitors). When not banding, keep per-column widths so the layout is unchanged.
     let max_cols = display.tooltip_max_columns;
@@ -615,34 +625,66 @@ fn build_tooltip(
     // Frame.
     let title = waybar::bold_fg(&colors.accent, "tickerbar");
     let local = now.with_timezone(&chrono::Local);
+    // Plain mode drops the Nerd clock glyph (it sits on a measured line).
+    let clock = if frame { "\u{f017}  " } else { "" };
     let footer = waybar::fg(
         &colors.dim,
-        &format!("  \u{f017}  Updated {}", local.format("%H:%M")),
+        &format!("  {clock}Updated {}", local.format("%H:%M")),
     );
     let mut measurable: Vec<&str> = bands.iter().flatten().map(|s| s.as_str()).collect();
     measurable.push(footer.as_str());
     let width = waybar::content_width(&measurable).max(waybar::visible_len(&title));
 
-    let mut out = vec![waybar::top_border(width, &colors.border)];
-    let left = width.saturating_sub(waybar::visible_len(&title)) / 2;
-    out.push(waybar::border_line(
-        &format!("{}{}", " ".repeat(left), title),
-        width,
-        &colors.border,
-    ));
-    out.push(waybar::separator(width, &colors.border, &colors.dim));
+    // Framed wraps each line in `│ … │` with top/bottom borders; plain emits the
+    // raw line and a plain dim rule for separators (no right edge to misalign).
+    let row = |content: &str| {
+        if frame {
+            waybar::border_line(content, width, &colors.border)
+        } else {
+            content.to_string()
+        }
+    };
+    let rule = || {
+        if frame {
+            waybar::separator(width, &colors.border, &colors.dim)
+        } else {
+            waybar::fg(&colors.dim, &"─".repeat(width))
+        }
+    };
+
+    let mut out: Vec<String> = Vec::new();
+    if frame {
+        out.push(waybar::top_border(width, &colors.border));
+        let left = width.saturating_sub(waybar::visible_len(&title)) / 2;
+        out.push(waybar::border_line(
+            &format!("{}{}", " ".repeat(left), title),
+            width,
+            &colors.border,
+        ));
+    } else {
+        out.push(title.clone());
+    }
+    out.push(rule());
     for (i, band) in bands.iter().enumerate() {
         if i > 0 {
-            out.push(waybar::separator(width, &colors.border, &colors.dim));
+            out.push(rule());
         }
         for line in band {
-            out.push(waybar::border_line(line, width, &colors.border));
+            out.push(row(line));
         }
     }
-    out.push(waybar::separator(width, &colors.border, &colors.dim));
-    out.push(waybar::border_line(&footer, width, &colors.border));
-    out.push(waybar::bottom_border(width, &colors.border));
-    out.join("\n")
+    out.push(rule());
+    out.push(row(&footer));
+    if frame {
+        out.push(waybar::bottom_border(width, &colors.border));
+    }
+
+    let body = out.join("\n");
+    if frame {
+        format!("<span font_family='JetBrainsMono Nerd Font Mono'>{body}</span>")
+    } else {
+        body
+    }
 }
 
 fn render_header(
@@ -651,6 +693,7 @@ fn render_header(
     closed: bool,
     sources: &HashMap<TooltipGroup, Vec<&'static str>>,
     colors: &ThemeColors,
+    frame: bool,
 ) -> String {
     let src = sources.get(&group).map(|v| v.join("·")).unwrap_or_default();
     let src_part = if src.is_empty() {
@@ -663,14 +706,22 @@ fn render_header(
     } else {
         String::new()
     };
+    // Plain mode drops the Nerd group glyph and the pause glyph (PUA widths are
+    // unreliable without a pinned font, and headers sit above aligned columns).
+    let glyph_part = if frame {
+        format!("{} ", waybar::fg(&colors.accent, group.glyph()))
+    } else {
+        String::new()
+    };
     let closed_part = if closed {
-        waybar::fg(&colors.dim, "  \u{f04c} closed") // pause glyph
+        let label = if frame { "  \u{f04c} closed" } else { "  closed" };
+        waybar::fg(&colors.dim, label)
     } else {
         String::new()
     };
     format!(
-        "  {} {}{}{}{}",
-        waybar::fg(&colors.accent, group.glyph()),
+        "  {}{}{}{}{}",
+        glyph_part,
         waybar::bold_fg(&colors.text, group.label()),
         src_part,
         cont_part,
@@ -819,6 +870,7 @@ mod tests {
             tooltip_rows_per_column: 0,
             tooltip_max_columns: 0,
             tooltip_range: false,
+            frame: false,
         }
     }
 
@@ -1509,6 +1561,7 @@ mod tests {
             .collect();
         let mut d = disp(DisplayMode::Fixed, 3);
         d.tooltip_rows_per_column = 4;
+        d.frame = true; // equal-width is a framed-box property
         let mut unlimited = d.clone();
         unlimited.tooltip_max_columns = 0;
         let wide = build_tooltip(
@@ -1562,6 +1615,7 @@ mod tests {
             .collect();
         let mut d = disp(DisplayMode::Fixed, 3);
         d.tooltip_rows_per_column = 4; // force multiple columns
+        d.frame = true; // equal-width is a framed-box property
         let tip = build_tooltip(
             &assets,
             &qs,
@@ -1574,6 +1628,56 @@ mod tests {
         assert!(
             widths.windows(2).all(|w| w[0] == w[1]),
             "all framed lines equal width"
+        );
+    }
+
+    #[test]
+    fn plain_tooltip_is_borderless_unpinned_and_glyph_free_but_aligned() {
+        let assets: Vec<Asset> = (0..3)
+            .map(|i| Asset {
+                label: format!("SYM{i}"),
+                source: AssetSource::Cnbc {
+                    symbol: format!("S{i}"),
+                },
+            })
+            .collect();
+        let qs: Vec<Quote> = (0..3)
+            .map(|i| Quote {
+                source: ProviderKind::Cnbc,
+                ..quote(
+                    &format!("SYM{i}"),
+                    Some(100.0 + i as f64),
+                    Some(Direction::Up),
+                    QuoteState::Fresh,
+                )
+            })
+            .collect();
+        let d = disp(DisplayMode::Fixed, 3); // frame defaults to false → plain
+        let tip = build_tooltip(
+            &assets,
+            &qs,
+            &d,
+            &MarketHours::default(),
+            &ThemeColors::default(),
+            Utc::now(),
+        );
+        // Plain mode: no box-drawing borders and no pinned font.
+        assert!(!tip.contains('╭') && !tip.contains('╰') && !tip.contains('│'));
+        assert!(!tip.contains("font_family"));
+        // Header keeps the group label text but drops the Nerd group glyph.
+        let g = group_of(&assets[0].source);
+        assert!(tip.contains(g.label()));
+        assert!(!tip.contains(g.glyph()));
+        // Data rows stay column-aligned even without a frame (uniform visible width).
+        let row_widths: Vec<usize> = tip
+            .lines()
+            .filter(|l| l.contains("SYM"))
+            .map(waybar::visible_len)
+            .collect();
+        assert_eq!(row_widths.len(), 3);
+        assert!(
+            row_widths.windows(2).all(|w| w[0] == w[1]),
+            "plain data rows stay aligned"
         );
     }
 }

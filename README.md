@@ -48,7 +48,7 @@ The tooltip groups your watchlist by asset class and wraps into columns as it gr
 ## Requirements
 
 - [Waybar](https://github.com/Alexays/Waybar)
-- A [Nerd Font](https://www.nerdfonts.com/) for icons (or set `icons = "ascii"`)
+- A [Nerd Font](https://www.nerdfonts.com/) for icons (or set `icons = "ascii"`; a Nerd Font Mono is required only for the framed tooltip, `frame = true`)
 
 ## Installation
 
@@ -98,6 +98,9 @@ bar = []                # e.g. ["BTC", "Blue", "S&P500"]
 # summary first; e.g. "{bar}   {summary}" puts it at the end. When one block is empty its
 # surrounding literals are dropped, so an empty summary never leaves a dangling separator.
 bar_layout = "{summary}   {bar}"
+# Tooltip frame: draw the bordered box and pin JetBrainsMono Nerd Font Mono so columns
+# stay aligned under any bar font. Off (default) = plain, borderless, renders in your font.
+frame = false
 
 [[asset]]
 label = "BTC"

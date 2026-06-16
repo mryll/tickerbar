@@ -15,9 +15,31 @@ pub const SCHEMA_VERSION: u32 = 2;
 pub enum FetchPolicy {
     /// Normal operation: serve if fresh within TTL, honor 429 backoff, else fetch.
     Normal,
-    /// Market closed: a cached quote fetched at/after `last_close` is the legitimate last
-    /// close — serve it as-is (not stale, no fetch). Otherwise fetch once.
+    /// Market closed, latest-snapshot provider: a cached quote fetched at/after `last_close` is
+    /// the legitimate last close — serve it as-is (not stale, no fetch). Otherwise fetch once.
+    /// Used by providers whose API still serves the last close/value off-hours.
     Closed { last_close: DateTime<Utc> },
+    /// Market closed, live-only provider (data912): the feed only carries quotes while the session
+    /// is live, so only a cache captured DURING the session window is trustworthy. Serve such a
+    /// cache as-is (the last in-session snapshot); otherwise serve what we have as stale (or empty)
+    /// and NEVER fetch or write — a closed-window fetch would return empty data and poison the
+    /// cache into the next open (via TTL) if persisted.
+    ClosedLiveSession {
+        session_start: DateTime<Utc>,
+        last_close: DateTime<Utc>,
+    },
+}
+
+/// Whether an existing record may be served as-is (not stale, no fetch) under `policy`.
+fn trusts_existing(policy: &FetchPolicy, fetched_at: DateTime<Utc>) -> bool {
+    match policy {
+        FetchPolicy::Normal => false,
+        FetchPolicy::Closed { last_close } => fetched_at >= *last_close,
+        FetchPolicy::ClosedLiveSession {
+            session_start,
+            last_close,
+        } => *session_start <= fetched_at && fetched_at <= *last_close,
+    }
 }
 
 #[derive(Serialize, Deserialize)]
@@ -110,12 +132,11 @@ where
 
     if !have_lock {
         // Another instance is fetching: serve what we have without blocking. A closed-market
-        // cache that is already the last close is served as-is (not stale).
+        // cache that is already trustworthy (last close / last in-session snapshot) is served
+        // as-is (not stale).
         return match existing {
             Some(rec) => {
-                let is_close = matches!(&policy,
-                    FetchPolicy::Closed { last_close } if rec.fetched_at >= *last_close);
-                if is_close {
+                if trusts_existing(&policy, rec.fetched_at) {
                     rec.quotes
                 } else {
                     served_stale(rec.quotes)
@@ -126,6 +147,25 @@ where
     }
 
     match &policy {
+        FetchPolicy::ClosedLiveSession { .. } => {
+            // Live-only provider while closed: the feed has no off-session data, so never fetch
+            // (a fetch would return empty and, if persisted, poison the next open via TTL).
+            // Serve the last in-session snapshot as-is, anything else as stale, or empty.
+            match &existing {
+                Some(rec) if trusts_existing(&policy, rec.fetched_at) => {
+                    unlock(lock);
+                    return rec.quotes.clone(); // last in-session snapshot
+                }
+                Some(rec) => {
+                    unlock(lock);
+                    return served_stale(rec.quotes.clone());
+                }
+                None => {
+                    unlock(lock);
+                    return Vec::new();
+                }
+            }
+        }
         FetchPolicy::Closed { last_close } => {
             if let Some(rec) = &existing {
                 if rec.fetched_at >= *last_close {
@@ -539,5 +579,114 @@ mod tests {
         );
         assert!(called);
         assert_eq!(out[0].price, Some(1.0));
+    }
+
+    #[test]
+    fn live_session_closed_serves_an_in_session_cache_as_is_without_fetching() {
+        let dir = tempdir();
+        let now = Utc::now();
+        let session_start = now - Duration::hours(11);
+        let last_close = now - Duration::hours(2);
+        let in_session = now - Duration::hours(5); // session_start <= in_session <= last_close
+        let _ = get_or_fetch(
+            &dir,
+            "live1",
+            Duration::seconds(60),
+            in_session,
+            FetchPolicy::Normal,
+            || Ok(vec![q(123.0, in_session)]),
+        );
+        let mut called = false;
+        let out = get_or_fetch(
+            &dir,
+            "live1",
+            Duration::seconds(0),
+            now,
+            FetchPolicy::ClosedLiveSession {
+                session_start,
+                last_close,
+            },
+            || {
+                called = true;
+                Ok(vec![q(999.0, now)])
+            },
+        );
+        assert!(
+            !called,
+            "an in-session snapshot must be served without fetching"
+        );
+        assert_eq!(out[0].price, Some(123.0));
+        assert_eq!(out[0].state, QuoteState::Fresh);
+    }
+
+    #[test]
+    fn live_session_closed_never_fetches_or_overwrites_a_dead_zone_cache() {
+        let dir = tempdir();
+        let now = Utc::now();
+        let session_start = now - Duration::hours(11);
+        let last_close = now - Duration::hours(2);
+        let dead_zone = now - Duration::minutes(30); // > last_close: captured in the dead zone
+        let _ = get_or_fetch(
+            &dir,
+            "live2",
+            Duration::seconds(60),
+            dead_zone,
+            FetchPolicy::Normal,
+            || Ok(vec![q(50.0, dead_zone)]),
+        );
+        let mut called = false;
+        let out = get_or_fetch(
+            &dir,
+            "live2",
+            Duration::seconds(0),
+            now,
+            FetchPolicy::ClosedLiveSession {
+                session_start,
+                last_close,
+            },
+            || {
+                called = true;
+                Ok(vec![q(999.0, now)])
+            },
+        );
+        assert!(
+            !called,
+            "a dead-zone cache must never trigger a closed-window fetch"
+        );
+        // Served as stale, and the on-disk record is untouched (no poisoning into the open).
+        assert_eq!(out[0].state, QuoteState::Stale);
+        assert_eq!(out[0].price, Some(50.0));
+        let rec = read_record(&key_file(&dir, "live2")).expect("record still present");
+        assert_eq!(
+            rec.fetched_at, dead_zone,
+            "the dead-zone record must not be overwritten"
+        );
+        assert_eq!(rec.quotes[0].price, Some(50.0));
+    }
+
+    #[test]
+    fn live_session_closed_with_no_cache_returns_empty_without_fetching() {
+        let dir = tempdir();
+        let now = Utc::now();
+        let mut called = false;
+        let out = get_or_fetch(
+            &dir,
+            "live3",
+            Duration::seconds(0),
+            now,
+            FetchPolicy::ClosedLiveSession {
+                session_start: now - Duration::hours(11),
+                last_close: now - Duration::hours(2),
+            },
+            || {
+                called = true;
+                Ok(vec![q(1.0, now)])
+            },
+        );
+        assert!(
+            !called,
+            "closed live-session mode must not fetch when there is no cache"
+        );
+        assert!(out.is_empty());
     }
 }

@@ -13,7 +13,7 @@ use chrono::{DateTime, Duration, Utc};
 use crate::platform::cache::{self, FetchPolicy};
 use crate::platform::config::MarketHours;
 use crate::platform::http::Http;
-use crate::platform::market::{self, Gate};
+use crate::platform::market::{self, ClosedCacheMode, Gate};
 use crate::platform::model::*;
 
 fn ttl(kind: ProviderKind) -> Duration {
@@ -88,15 +88,29 @@ fn assemble(
 /// ANY asset's market is open (e.g. a CNBC batch with a 24/5 commodity stays live even when the
 /// equity session is closed). Closed only when every asset is closed, at the latest close seen.
 fn group_policy(group: &[&Asset], now: DateTime<Utc>, market: &MarketHours) -> FetchPolicy {
-    let mut last_close = None;
+    // The group is single-provider (grouped by ProviderKind), so the closed-cache mode is the same
+    // for every asset; the last-seen closed window is fine, same as before.
+    let mut closed = None;
     for a in group {
         match market::gate(&a.source, now, market) {
             Gate::Open => return FetchPolicy::Normal,
-            Gate::Closed { last_close: lc } => last_close = Some(lc),
+            Gate::Closed {
+                last_close,
+                session_start,
+                mode,
+            } => closed = Some((last_close, session_start, mode)),
         }
     }
-    match last_close {
-        Some(lc) => FetchPolicy::Closed { last_close: lc },
+    match closed {
+        Some((last_close, session_start, ClosedCacheMode::LiveSessionOnly)) => {
+            FetchPolicy::ClosedLiveSession {
+                session_start,
+                last_close,
+            }
+        }
+        Some((last_close, _, ClosedCacheMode::LatestSnapshot)) => {
+            FetchPolicy::Closed { last_close }
+        }
         None => FetchPolicy::Normal,
     }
 }

@@ -20,9 +20,19 @@ struct Row {
 type PanelMap = HashMap<String, (Option<f64>, Option<f64>)>;
 
 /// Parse one panel body into `symbol(upper) -> (last, pct_change)`. Whole-body failure -> Err.
+///
+/// An empty panel array means the whole exchange isn't trading (holiday/outage/off-session) — the
+/// live feed has nothing, NOT that the panel is malformed. Treat it as a transient error so the
+/// cache serves stale and never freezes an empty snapshot. (Per-symbol absence is different: a
+/// non-empty panel that just lacks a configured symbol stays `Missing`, handled by the caller.)
 fn panel_map(body: &str) -> Result<PanelMap, FetchError> {
     let rows: Vec<Row> = serde_json::from_str(body)
         .map_err(|e| FetchError::Other(format!("data912: unexpected response: {e}")))?;
+    if rows.is_empty() {
+        return Err(FetchError::Other(
+            "data912: empty panel (market likely closed)".to_string(),
+        ));
+    }
     Ok(rows
         .into_iter()
         .map(|r| (r.symbol.to_uppercase(), (r.c, r.pct_change)))
@@ -182,5 +192,14 @@ mod tests {
         let assets = [asset("ALUA")];
         let refs: Vec<&Asset> = assets.iter().collect();
         assert!(parse_panel(Panel::Acciones, "<html>nope</html>", &refs, Utc::now()).is_err());
+    }
+
+    #[test]
+    fn an_empty_panel_array_is_a_transient_error_not_a_panel_of_missing_quotes() {
+        // Off-session/holiday: the live feed returns []. Treat it as a transient error so the
+        // cache serves stale instead of freezing an all-Missing snapshot.
+        let assets = [asset("ALUA")];
+        let refs: Vec<&Asset> = assets.iter().collect();
+        assert!(parse_panel(Panel::Acciones, "[]", &refs, Utc::now()).is_err());
     }
 }

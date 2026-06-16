@@ -717,7 +717,11 @@ fn render_header(
         String::new()
     };
     let closed_part = if closed {
-        let label = if frame { "  \u{f04c} closed" } else { "  closed" };
+        let label = if frame {
+            "  \u{f04c} closed"
+        } else {
+            "  closed"
+        };
         waybar::fg(&colors.dim, label)
     } else {
         String::new()

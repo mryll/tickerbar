@@ -6,7 +6,23 @@ use crate::platform::model::AssetSource;
 
 pub enum Gate {
     Open,
-    Closed { last_close: DateTime<Utc> },
+    Closed {
+        last_close: DateTime<Utc>,
+        /// Start of the session that produced `last_close` (its `open`, in UTC).
+        session_start: DateTime<Utc>,
+        mode: ClosedCacheMode,
+    },
+}
+
+/// How a provider's cache should behave while its market is closed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClosedCacheMode {
+    /// API still serves the last close/value off-hours — a cache fetched any time after the close
+    /// is the legitimate last close (most providers).
+    LatestSnapshot,
+    /// Live-only feed that empties outside the session (data912) — only a cache captured during the
+    /// session window counts; off-session fetches return empty and must never be frozen.
+    LiveSessionOnly,
 }
 
 /// Weekday session, with the feed delay + grace already baked into `fetch_close` so we keep
@@ -15,6 +31,7 @@ struct MarketSpec {
     tz: Tz,
     open: NaiveTime,
     fetch_close: NaiveTime,
+    closed_cache_mode: ClosedCacheMode,
 }
 
 fn at(h: u32, m: u32) -> NaiveTime {
@@ -35,23 +52,28 @@ fn spec(source: &AssetSource) -> Option<MarketSpec> {
             tz: ba,
             open: at(10, 30),
             fetch_close: at(19, 30), // 17:00 close + ~2h30 feed delay/grace
+            // /live/ endpoints carry only currently-trading rows; off-session they empty out.
+            closed_cache_mode: ClosedCacheMode::LiveSessionOnly,
         }),
         AssetSource::Dolarapi { .. } => Some(MarketSpec {
             tz: ba,
             open: at(10, 0),
             fetch_close: at(17, 30),
+            closed_cache_mode: ClosedCacheMode::LatestSnapshot,
         }),
         AssetSource::Stooq { .. } | AssetSource::Finnhub { .. } | AssetSource::Cnbc { .. } => {
             Some(MarketSpec {
                 tz: chrono_tz::America::New_York,
                 open: at(9, 30),
                 fetch_close: at(16, 15), // 16:00 close + grace
+                closed_cache_mode: ClosedCacheMode::LatestSnapshot,
             })
         }
         AssetSource::Frankfurter { .. } => Some(MarketSpec {
             tz: chrono_tz::Europe::Berlin,
             open: at(0, 0),
             fetch_close: at(23, 59), // ECB reference rate: weekday-only, daily
+            closed_cache_mode: ClosedCacheMode::LatestSnapshot,
         }),
     }
 }
@@ -74,14 +96,19 @@ pub fn gate(source: &AssetSource, now: DateTime<Utc>, cfg: &MarketHours) -> Gate
     if open_now {
         Gate::Open
     } else {
+        let (session_start, last_close) = closed_window(&spec, now);
         Gate::Closed {
-            last_close: last_close(&spec, now),
+            last_close,
+            session_start,
+            mode: spec.closed_cache_mode,
         }
     }
 }
 
-/// Most recent weekday `fetch_close` instant <= `now`, computed in the market tz, as UTC.
-fn last_close(spec: &MarketSpec, now: DateTime<Utc>) -> DateTime<Utc> {
+/// The most recent finished weekday session at/before `now`, as `(session_start, last_close)` in
+/// UTC: `last_close` is the most recent weekday `fetch_close` instant <= `now`, and `session_start`
+/// is that same date's `open`. Both are computed in the market tz.
+fn closed_window(spec: &MarketSpec, now: DateTime<Utc>) -> (DateTime<Utc>, DateTime<Utc>) {
     let mut date = now.with_timezone(&spec.tz).date_naive();
     for _ in 0..8 {
         if is_weekday(date.weekday()) {
@@ -92,7 +119,15 @@ fn last_close(spec: &MarketSpec, now: DateTime<Utc>) -> DateTime<Utc> {
             {
                 let utc_close = local_close.with_timezone(&Utc);
                 if utc_close <= now {
-                    return utc_close;
+                    // DST gap on `open` is vanishingly unlikely at these times; if it ever hits,
+                    // clamp session_start to the close so the trust window is empty (fail safe).
+                    let session_start = spec
+                        .tz
+                        .from_local_datetime(&date.and_time(spec.open))
+                        .single()
+                        .map(|dt| dt.with_timezone(&Utc))
+                        .unwrap_or(utc_close);
+                    return (session_start, utc_close);
                 }
             }
         }
@@ -101,7 +136,7 @@ fn last_close(spec: &MarketSpec, now: DateTime<Utc>) -> DateTime<Utc> {
             None => break,
         };
     }
-    now
+    (now, now)
 }
 
 #[cfg(test)]
@@ -174,16 +209,57 @@ mod tests {
     }
 
     #[test]
-    fn byma_is_closed_overnight_with_last_close_on_the_prior_weekday() {
+    fn byma_is_closed_overnight_with_the_window_on_the_prior_weekday() {
         let ba = chrono_tz::America::Argentina::Buenos_Aires;
         let now = utc(ba, 2026, 6, 4, 3, 0); // Thursday 03:00 ART (before open)
         match gate(&data912(), now, &cfg()) {
-            Gate::Closed { last_close } => {
-                // last close should be Wednesday 19:30 ART
+            Gate::Closed {
+                last_close,
+                session_start,
+                mode,
+            } => {
+                // The window is Wednesday's session: open 10:30, close 19:30 ART.
                 let lc = last_close.with_timezone(&ba);
                 assert_eq!(lc.weekday(), Weekday::Wed);
                 assert_eq!(lc.time(), at(19, 30));
+                let ss = session_start.with_timezone(&ba);
+                assert_eq!(ss.weekday(), Weekday::Wed);
+                assert_eq!(ss.time(), at(10, 30));
+                assert_eq!(mode, ClosedCacheMode::LiveSessionOnly);
             }
+            Gate::Open => panic!("expected Closed"),
+        }
+    }
+
+    #[test]
+    fn byma_opens_at_1030_and_closes_at_1930_local() {
+        let ba = chrono_tz::America::Argentina::Buenos_Aires;
+        // Exactly at open -> Open; one minute before -> Closed.
+        assert!(matches!(
+            gate(&data912(), utc(ba, 2026, 6, 4, 10, 30), &cfg()),
+            Gate::Open
+        ));
+        assert!(matches!(
+            gate(&data912(), utc(ba, 2026, 6, 4, 10, 29), &cfg()),
+            Gate::Closed { .. }
+        ));
+        // Exactly at fetch_close -> Closed (t < fetch_close is the open condition).
+        assert!(matches!(
+            gate(&data912(), utc(ba, 2026, 6, 4, 19, 30), &cfg()),
+            Gate::Closed { .. }
+        ));
+        assert!(matches!(
+            gate(&data912(), utc(ba, 2026, 6, 4, 19, 29), &cfg()),
+            Gate::Open
+        ));
+    }
+
+    #[test]
+    fn latest_snapshot_providers_use_that_closed_cache_mode() {
+        let ny = chrono_tz::America::New_York;
+        let now = utc(ny, 2026, 7, 1, 20, 0); // 20:00 ET, after close
+        match gate(&cnbc(), now, &cfg()) {
+            Gate::Closed { mode, .. } => assert_eq!(mode, ClosedCacheMode::LatestSnapshot),
             Gate::Open => panic!("expected Closed"),
         }
     }

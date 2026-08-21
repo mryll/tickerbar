@@ -68,6 +68,8 @@ tickerbar --preset starter > ~/.config/tickerbar/config.toml
 tickerbar
 ```
 
+Run `tickerbar --help` for the full reference: the usage line, every flag, and the format placeholders.
+
 The last command prints one line of Waybar JSON. The `starter` preset is a balanced set across markets: crypto, one megacap stock, one index, gold, one Treasury yield and one forex pair.
 
 To see the other presets:

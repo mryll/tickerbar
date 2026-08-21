@@ -29,6 +29,7 @@
         "key": "refreshIntervalSec",
         "type": "integer",
         "label": "Refresh interval (seconds)",
+        "description": "How often to re-run the CLI. Quotes are cached, and a market that is closed does not move — the widget backs off on its own.",
         "min": 5,
         "max": 3600,
         "step": 5,
@@ -38,6 +39,7 @@
         "key": "configPath",
         "type": "string",
         "label": "Config file (empty = ~/.config/tickerbar/config.toml)",
+        "description": "Absolute path to a TOML file listing the assets to track. Leave empty to use ~/.config/tickerbar/config.toml.",
         "defaultValue": ""
       },
       {
@@ -63,7 +65,7 @@
           "panel-only"
         ],
         "defaultValue": "full",
-        "description": "Where direction tinting is applied. Monochrome keeps the glyphs, the dimming and the signed change."
+        "description": "Monochrome rendering uses foreground tones only — severity stays readable through the numbers and glyphs. none: no color anywhere. bar-only: colored bar face, plain panel. panel-only: the reverse."
       }
     ]
   }

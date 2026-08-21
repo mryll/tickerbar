@@ -6,7 +6,7 @@
 A multi-market price ticker for [Waybar](https://github.com/Alexays/Waybar) and the [Omarchy](https://omarchy.org) shell. It shows crypto, stocks, indices, commodities, forex and Treasury yields in one widget. Every default provider needs **no API key**. Finnhub is the one exception, and it is optional.
 
 <p align="center">
-  <img src="screenshots/omarchy-panel.png" alt="tickerbar panel in the Omarchy shell" width="820">
+  <img src="screenshots/omarchy-panel.png" alt="tickerbar panel in the Omarchy shell" width="794">
 </p>
 
 <p align="center">
@@ -320,6 +320,10 @@ The Waybar tooltip follows the same themes:
 
 tickerbar also has a native widget for the [Omarchy shell](https://github.com/basecamp/omarchy), in the `omarchy/` directory.
 
+<p align="center">
+  <img src="screenshots/omarchy-desktop.png" alt="tickerbar in the Omarchy bar, with its panel open" width="960">
+</p>
+
 The bar shows your list from `display.bar` as a compact strip with tinted prices, each one led by its asset-class mark. A click opens a themed panel. The panel starts with a header that gives the asset count and the number of markets that are open. Below the header, the full watchlist is a real table, grouped by asset class. The header also carries the watchlist average, which the panel shows by default. Use `summaryMode` to control it. A value of `hide` removes the average from the bar and from the panel. Closed markets are dim, and a footer gives the time of the last update. A middle click gets new data. The footer of the panel ends with a refresh control (󰑐), next to the time of the last update. The control stays disabled while a fetch runs.
 
 The panel never scrolls. Long watchlists wrap into side-by-side columns and into bands below. The core computes the packing one time, in the same code that lays out the Waybar tooltip. It sends the plan inside the structured JSON (`layout.bands`). The panel only draws it.
@@ -358,7 +362,7 @@ Change these settings in the settings window of the shell, or write them in the 
 | `colorMode` | enum | `full` | Direction tint: `full`, `none`, `bar-only` (color on the strip only), `panel-only` (the opposite). This is equal to `--no-color` in the CLI. |
 
 <p align="center">
-  <img src="screenshots/omarchy-panel-mono.png" alt="Omarchy panel with colorMode set to none" width="820">
+  <img src="screenshots/omarchy-panel-mono.png" alt="Omarchy panel with colorMode set to none" width="790">
 </p>
 
 ## Structured JSON output

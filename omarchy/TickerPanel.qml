@@ -12,6 +12,7 @@ Panel {
   id: root
   moduleName: "mryll.tickerbar"
   ipcTarget: "mryll.tickerbar"
+  manageIpc: false
 
   property var anchorItem: null
   property bool openedFromHotkey: false
@@ -41,8 +42,8 @@ Panel {
   // ---- Freshness suffix tint, shared by the whole family. The timestamp is
   // ALWAYS dim ("when is this from" is information, not a warning); only the
   // "· stale" / "· partial data" suffix carries a muted warning tone.
-  readonly property color freshnessWarn: panelMono
-    ? mutedFg : mixColor(mutedFg, urgentColor, 0.4)
+  readonly property color freshnessWarn: panelColored
+    ? mixColor(mutedFg, urgentColor, 0.4) : mutedFg
   readonly property color urgentColor: root.bar ? root.bar.urgent : Color.urgent
   readonly property string panelFont: root.bar ? root.bar.fontFamily : Style.font.family
 
@@ -59,9 +60,14 @@ Panel {
   // "bar-only" (colored bar face, monochrome panel) and "panel-only" (the
   // reverse). Dimming and the muted closed/stale treatments are NOT color, so
   // they survive every mode; only accent/urgent tinting is gated.
-  readonly property string colorMode: String(setting("colorMode", "full"))
-  readonly property bool panelMono: colorMode === "none" || colorMode === "bar-only"
-  readonly property bool barMono: colorMode === "none" || colorMode === "panel-only"
+  // An unrecognized value normalizes to "full": a hand-edited shell.json must
+  // not be able to silently take the color off both surfaces.
+  readonly property string colorMode: {
+    var v = String(setting("colorMode", "full"))
+    return ["full", "none", "bar-only", "panel-only"].indexOf(v) >= 0 ? v : "full"
+  }
+  readonly property bool barColored:   colorMode === "full" || colorMode === "bar-only"
+  readonly property bool panelColored: colorMode === "full" || colorMode === "panel-only"
 
   readonly property string binName: "tickerbar"
   readonly property string configPath: String(setting("configPath", "")).trim()
@@ -209,13 +215,13 @@ Panel {
   // stays readable through the signed change text, exactly like the CLI tooltip.
   function panelDirColor(dir, base, strength) {
     var b = base === undefined ? panelFg : base
-    return panelMono ? b : dirColorFor(dir, b, strength)
+    return panelColored ? dirColorFor(dir, b, strength) : b
   }
 
   // Accent/urgent carriers, resolved once so the mono branch is in one place. Both
   // prefer the core's palette, falling back to the shell theme for older documents.
-  readonly property color panelAccent: panelMono ? panelFg : paletteColor("accent", Color.accent)
-  readonly property color panelUrgent: panelMono ? panelFg : paletteColor("error", urgentColor)
+  readonly property color panelAccent: panelColored ? paletteColor("accent", Color.accent) : panelFg
+  readonly property color panelUrgent: panelColored ? paletteColor("error", urgentColor) : panelFg
 
   // ---- Compact bar strip model consumed by BarWidget.qml: the CLI-resolved
   //      curated subset (config `display.bar`, order preserved), optionally
@@ -559,6 +565,21 @@ Panel {
   function toggle() {
     if (root.opened) root.close()
     else root.openFromHotkey()
+  }
+
+  // The shell's base handler covers open/close/show/hide/toggle; this one adds
+  // `refresh` so a keybind or a script can force a fetch without opening the
+  // panel. Overriding means restating the five, so `manageIpc: false` above
+  // turns the base one off and this is the only handler on the target.
+  IpcHandler {
+    target: root.ipcTarget
+
+    function open(): void { root.openFromHotkey() }
+    function close(): void { root.close() }
+    function show(): void { root.openFromHotkey() }
+    function hide(): void { root.close() }
+    function toggle(): void { root.toggle() }
+    function refresh(): void { root.refresh() }
   }
 
   function switchPanel(direction) {

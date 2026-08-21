@@ -189,10 +189,10 @@ BarWidget {
 
   // Monochrome strip ("none" / "panel-only" in the plugin's `colorMode`). The
   // muted closed-market dimming is not color, so it stays in every mode.
-  readonly property bool barMono: marketPanel ? marketPanel.barMono === true : false
+  readonly property bool barColored: marketPanel ? marketPanel.barColored === true : false
 
   function entryColor(entry, base) {
-    if (!root.marketPanel || root.barMono) return base
+    if (!root.marketPanel || !root.barColored) return base
     // No strength: land on the core's published direction colour, the same one the
     // Waybar bar text paints, so the two bars never disagree about a number.
     return root.marketPanel.dirColorFor(entry.dir, base)
@@ -240,7 +240,7 @@ BarWidget {
   // Glyph tint when the strip is collapsed: the shared direction of all
   // entries, or plain foreground when mixed/empty.
   readonly property color glyphColor: {
-    if (entries.length === 0 || !marketPanel || barMono) return baseFg
+    if (entries.length === 0 || !marketPanel || !barColored) return baseFg
     var dir = entries[0].dir
     for (var i = 1; i < entries.length; i++) {
       if (entries[i].dir !== dir) return baseFg

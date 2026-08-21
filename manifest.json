@@ -1,0 +1,70 @@
+{
+  "schemaVersion": 1,
+  "id": "mryll.tickerbar",
+  "name": "Tickerbar",
+  "version": "1.0.0",
+  "author": "mryll",
+  "license": "MIT",
+  "description": "Multi-market price ticker (crypto, stocks, indices, commodities, forex, rates) in the Omarchy bar.",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "omarchy/BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "Tickerbar",
+    "description": "Click: market table. Middle click: refresh.",
+    "category": "Status",
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "defaults": {
+      "refreshIntervalSec": 60,
+      "configPath": "",
+      "summaryMode": "follow",
+      "colorMode": "full"
+    },
+    "schema": [
+      {
+        "key": "refreshIntervalSec",
+        "type": "integer",
+        "label": "Refresh interval (seconds)",
+        "min": 5,
+        "max": 3600,
+        "step": 5,
+        "defaultValue": 60
+      },
+      {
+        "key": "configPath",
+        "type": "string",
+        "label": "Config file (empty = ~/.config/tickerbar/config.toml)",
+        "defaultValue": ""
+      },
+      {
+        "key": "summaryMode",
+        "type": "enum",
+        "label": "Watchlist average on the bar",
+        "options": [
+          "follow",
+          "show",
+          "hide"
+        ],
+        "defaultValue": "follow",
+        "description": "Applies to the BAR only; the panel shows the average by default. follow = honor the config's summary_format; show forces it on the bar; hide removes it from both."
+      },
+      {
+        "key": "colorMode",
+        "type": "enum",
+        "label": "Colors",
+        "options": [
+          "full",
+          "none",
+          "bar-only",
+          "panel-only"
+        ],
+        "defaultValue": "full",
+        "description": "Where direction tinting is applied. Monochrome keeps the glyphs, the dimming and the signed change."
+      }
+    ]
+  }
+}

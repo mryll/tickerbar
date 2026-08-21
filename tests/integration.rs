@@ -50,14 +50,14 @@ fn frankfurter_returns_an_eur_usd_rate() {
 }
 
 #[test]
-fn stooq_degrades_gracefully_through_fetch_all() {
-    // Stooq is frequently bot-walled; via fetch_all the widget must still return exactly one
-    // quote for the asset (Fresh if reachable, otherwise Missing/Stale) and never error.
+fn an_unreachable_symbol_degrades_gracefully_through_fetch_all() {
+    // A symbol the feed does not know must still yield exactly one quote for the asset
+    // (Fresh if reachable, otherwise Missing/Stale) and never error out of fetch_all.
     let http = Http::new(8);
     let assets = vec![Asset {
         label: "AAPL".into(),
-        source: AssetSource::Stooq {
-            symbol: "aapl.us".into(),
+        source: AssetSource::Cnbc {
+            symbol: "AAPL".into(),
         },
     }];
     let qs = providers::fetch_all(

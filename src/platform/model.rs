@@ -34,7 +34,6 @@ pub enum QuoteState {
 pub enum ProviderKind {
     CoinGecko,
     DolarApi,
-    Stooq,
     Frankfurter,
     Finnhub,
     Cnbc,
@@ -46,7 +45,6 @@ impl ProviderKind {
         match self {
             ProviderKind::CoinGecko => "coingecko",
             ProviderKind::DolarApi => "dolarapi",
-            ProviderKind::Stooq => "stooq",
             ProviderKind::Frankfurter => "frankfurter",
             ProviderKind::Finnhub => "finnhub",
             ProviderKind::Cnbc => "cnbc",
@@ -95,7 +93,7 @@ pub enum Side {
 }
 
 /// Provider-specific asset shape. A tagged enum keyed by the TOML `provider` field, so a
-/// CoinGecko asset cannot carry a Stooq `symbol` — invalid states are unrepresentable.
+/// CoinGecko asset cannot carry a CNBC `symbol` — invalid states are unrepresentable.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "provider", rename_all = "snake_case")]
 pub enum AssetSource {
@@ -107,9 +105,6 @@ pub enum AssetSource {
         casa: String,
         #[serde(default)]
         side: Side,
-    },
-    Stooq {
-        symbol: String,
     },
     Frankfurter {
         base: String,
@@ -144,7 +139,6 @@ impl AssetSource {
         match self {
             AssetSource::Coingecko { .. } => ProviderKind::CoinGecko,
             AssetSource::Dolarapi { .. } => ProviderKind::DolarApi,
-            AssetSource::Stooq { .. } => ProviderKind::Stooq,
             AssetSource::Frankfurter { .. } => ProviderKind::Frankfurter,
             AssetSource::Finnhub { .. } => ProviderKind::Finnhub,
             AssetSource::Cnbc { .. } => ProviderKind::Cnbc,
@@ -156,12 +150,30 @@ impl AssetSource {
         }
     }
 
+    /// Quote currency that is known STATICALLY from the asset definition, before any fetch:
+    /// data912 and dolarapi serve ARS by definition; coingecko/frankfurter quote in the
+    /// configured currency. `None` where only the feed can say (CNBC reports per-row
+    /// currency; finnhub depends on the exchange suffix) — genuinely unknown until
+    /// fetched. Used to keep placeholder quotes (`Quote::unavailable`) carrying a real
+    /// currency instead of an empty one.
+    pub fn quote_currency(&self) -> Option<String> {
+        match self {
+            AssetSource::Coingecko { quote, .. } => Some(quote.to_lowercase()),
+            AssetSource::Frankfurter { quote, .. } => Some(quote.to_lowercase()),
+            AssetSource::Dolarapi { .. } | AssetSource::Data912 { .. } => Some("ars".to_string()),
+            AssetSource::Finnhub { .. }
+            | AssetSource::Cnbc { .. }
+            | AssetSource::Commodity { .. }
+            | AssetSource::Index { .. }
+            | AssetSource::Rate { .. } => None,
+        }
+    }
+
     /// Stable per-asset descriptor used (in input order) to build the cache key.
     pub fn cache_descriptor(&self) -> String {
         match self {
             AssetSource::Coingecko { id, quote } => format!("cg:{id}:{quote}"),
             AssetSource::Dolarapi { casa, side } => format!("da:{casa}:{side:?}"),
-            AssetSource::Stooq { symbol } => format!("st:{symbol}"),
             AssetSource::Frankfurter { base, quote } => format!("fx:{base}:{quote}"),
             AssetSource::Finnhub { symbol } => format!("fh:{symbol}"),
             AssetSource::Cnbc { symbol } => format!("cb:{symbol}"),
@@ -202,12 +214,14 @@ pub struct Quote {
 }
 
 impl Quote {
-    /// A non-usable quote for a missing/errored symbol (`price = None`).
+    /// A non-usable quote for a missing/errored symbol (`price = None`). The quote
+    /// currency is still filled in when the asset defines it statically (a closed
+    /// BYMA row is priceless, not currencyless).
     pub fn unavailable(asset: &Asset, state: QuoteState, now: DateTime<Utc>) -> Self {
         Quote {
             label: asset.label.clone(),
             base: String::new(),
-            quote: String::new(),
+            quote: asset.source.quote_currency().unwrap_or_default(),
             native_quote: String::new(),
             price: None,
             change_pct: None,
@@ -236,10 +250,10 @@ mod tests {
 
     #[test]
     fn the_provider_kind_is_derived_from_the_asset_source() {
-        let a = AssetSource::Stooq {
-            symbol: "aapl.us".into(),
+        let a = AssetSource::Cnbc {
+            symbol: "AAPL".into(),
         };
-        assert_eq!(a.kind(), ProviderKind::Stooq);
+        assert_eq!(a.kind(), ProviderKind::Cnbc);
     }
 
     #[test]
@@ -259,6 +273,44 @@ mod tests {
         assert_eq!(com.cache_descriptor(), "cb:com:gold");
         assert_eq!(idx.cache_descriptor(), "cb:idx:vix");
         assert_eq!(rate.cache_descriptor(), "cb:rate:us10y");
+    }
+
+    #[test]
+    fn an_unavailable_quote_still_carries_a_statically_known_currency() {
+        let byma = Asset {
+            label: "ALUA".into(),
+            source: AssetSource::Data912 {
+                panel: Panel::Acciones,
+                symbol: "ALUA".into(),
+            },
+        };
+        let q = Quote::unavailable(&byma, QuoteState::Missing, chrono::Utc::now());
+        assert_eq!(q.quote, "ars");
+        assert_eq!(q.price, None);
+
+        let cg = Asset {
+            label: "BTC/ARS".into(),
+            source: AssetSource::Coingecko {
+                id: "bitcoin".into(),
+                quote: "ARS".into(),
+            },
+        };
+        assert_eq!(
+            Quote::unavailable(&cg, QuoteState::Missing, chrono::Utc::now()).quote,
+            "ars"
+        );
+
+        // Feed-decided currencies stay genuinely unknown until fetched.
+        let cnbc = Asset {
+            label: "TSLA".into(),
+            source: AssetSource::Cnbc {
+                symbol: "TSLA".into(),
+            },
+        };
+        assert_eq!(
+            Quote::unavailable(&cnbc, QuoteState::Missing, chrono::Utc::now()).quote,
+            ""
+        );
     }
 
     #[test]

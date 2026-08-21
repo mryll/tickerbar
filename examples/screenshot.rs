@@ -128,7 +128,13 @@ fn build_output(
         assets,
     };
     let colors = ThemeColors::load();
-    render::build(&cfg, &quotes, Utc::now(), &colors)
+    render::build(
+        &cfg,
+        &quotes,
+        Utc::now(),
+        &colors,
+        render::ColorMode::default(),
+    )
 }
 
 fn render_tooltip(pairs: Vec<(Asset, Quote)>, display: Display) -> String {

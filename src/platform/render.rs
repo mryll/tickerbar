@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use chrono::{DateTime, Duration, Utc};
+use serde::Serialize;
 
 use crate::platform::config::{Config, Display, DisplayMode, MarketHours};
 use crate::platform::icons::IconSet;
@@ -41,8 +42,14 @@ fn fmt_price(p: Option<f64>) -> String {
     }
 }
 
-fn fmt_change(c: Option<f64>) -> String {
+/// Signed change %, EXCEPT for a flat quote: a `+` on something that did not move reads as
+/// a gain, so `Flat` renders unsigned with a leading space (printf's space flag) — same
+/// visible width, so the column stays aligned. The decision is the model's `Direction`, not
+/// the rounded number: a tiny-but-nonzero move that prints as `0.00` is `Up`/`Down` and
+/// keeps its real sign.
+fn fmt_change(c: Option<f64>, dir: Option<Direction>) -> String {
     match c {
+        Some(v) if dir == Some(Direction::Flat) => format!(" {:.2}%", v.abs()),
         Some(v) => format!("{:+.2}%", v),
         None => String::new(),
     }
@@ -51,7 +58,8 @@ fn fmt_change(c: Option<f64>) -> String {
 /// Equal-weight mean of `change_pct` over quotes whose change is `Some` and finite.
 /// Returns `None` when no quote has a usable change (=> the summary segment is omitted) or if
 /// the computed mean is non-finite (overflow guard) — preserves the never-crash invariant.
-fn avg_change_pct(quotes: &[Quote]) -> Option<f64> {
+/// Shared with the structured JSON output (`platform::data`).
+pub(crate) fn avg_change_pct(quotes: &[Quote]) -> Option<f64> {
     let mut sum = 0.0;
     let mut count = 0u32;
     for q in quotes {
@@ -112,7 +120,7 @@ fn render_one(
     colors: &ThemeColors,
 ) -> String {
     let price_plain = fmt_value(q.price, group);
-    let change_plain = fmt_change(q.change_pct);
+    let change_plain = fmt_change(q.change_pct, q.direction);
     let arrow = icons.arrow(q.direction);
     // Color the price + arrow + change% by direction (green up / red down), matching the
     // tooltip; label and glyph stay the theme foreground. Bar text is rendered with Pango.
@@ -143,7 +151,7 @@ fn render_one(
 /// (green up / red down); a flat average is left unspanned. Literal text is untouched.
 fn render_summary(avg: f64, fmt: &str, icons: &IconSet, colors: &ThemeColors) -> String {
     let dir = Direction::from_change(avg);
-    let change_plain = fmt_change(Some(avg));
+    let change_plain = fmt_change(Some(avg), Some(dir));
     let arrow = icons.arrow(Some(dir));
     let (arrow_s, change_s) = match dir {
         Direction::Up => (
@@ -210,8 +218,9 @@ fn bar_candidates(assets: &[Asset], bar: &[String]) -> Vec<usize> {
 }
 
 /// Asset indices actually shown on the bar, per display mode — the single source of truth for
-/// bar text, module direction class, and the `closed` badge. `epoch` = unix seconds (bucket).
-fn bar_indices(assets: &[Asset], d: &Display, epoch: u64) -> Vec<usize> {
+/// bar text, module direction class, the `closed` badge, and the structured output's `bar` list.
+/// `epoch` = unix seconds (bucket).
+pub(crate) fn bar_indices(assets: &[Asset], d: &Display, epoch: u64) -> Vec<usize> {
     let candidates = bar_candidates(assets, &d.bar);
     match d.mode {
         DisplayMode::Fixed => candidates.into_iter().take(d.max_on_bar).collect(),
@@ -299,16 +308,70 @@ pub fn module_class(all: &[Quote], visible: &[&Quote]) -> Vec<String> {
     classes
 }
 
+/// Which of the two Pango surfaces render in color. The structured JSON (`platform::data`)
+/// carries no presentation and is unaffected by this; so is the waybar `class` list, which
+/// is precisely what lets a monochrome user style the module from their own CSS.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct ColorMode {
+    bar: bool,
+    tooltip: bool,
+}
+
+impl ColorMode {
+    /// Colored bar and tooltip — the default.
+    pub const FULL: Self = Self {
+        bar: true,
+        tooltip: true,
+    };
+    /// `--no-color` / `--no-color=all`.
+    pub const NONE: Self = Self {
+        bar: false,
+        tooltip: false,
+    };
+    /// `--no-color=bar`: plain bar text, colored tooltip.
+    pub const PLAIN_BAR: Self = Self {
+        bar: false,
+        tooltip: true,
+    };
+    /// `--no-color=tooltip`: colored bar text, plain tooltip.
+    pub const PLAIN_TOOLTIP: Self = Self {
+        bar: true,
+        tooltip: false,
+    };
+
+    pub fn bar(self) -> bool {
+        self.bar
+    }
+
+    pub fn tooltip(self) -> bool {
+        self.tooltip
+    }
+}
+
+impl Default for ColorMode {
+    fn default() -> Self {
+        Self::FULL
+    }
+}
+
 pub fn build(
     cfg: &Config,
     quotes: &[Quote],
     now: DateTime<Utc>,
     colors: &ThemeColors,
+    mode: ColorMode,
 ) -> WaybarOutput {
+    // Monochrome is a palette, not a branch in the renderers: each surface is handed
+    // either the theme or the empty palette, so plain and colored output travel the exact
+    // same code path and the measured column widths cannot drift apart.
+    let mono = ThemeColors::monochrome();
+    let bar_colors = if mode.bar() { colors } else { &mono };
+    let tooltip_colors = if mode.tooltip() { colors } else { &mono };
+
     let epoch = now.timestamp().max(0) as u64;
     let idx = bar_indices(&cfg.assets, &cfg.display, epoch);
     let vis: Vec<&Quote> = idx.iter().filter_map(|&i| quotes.get(i)).collect();
-    let text = bar_text(&cfg.assets, quotes, &cfg.display, epoch, colors);
+    let text = bar_text(&cfg.assets, quotes, &cfg.display, epoch, bar_colors);
     let mut class = module_class(quotes, &vis);
     // `closed` class when every asset currently on the bar is in a closed market.
     let all_closed = !idx.is_empty()
@@ -331,7 +394,7 @@ pub fn build(
         quotes,
         &cfg.display,
         &cfg.market_hours,
-        colors,
+        tooltip_colors,
         now,
     );
     WaybarOutput {
@@ -345,9 +408,10 @@ pub fn build(
 // ---- Tooltip ---------------------------------------------------------------------------
 
 /// Tooltip section. Derived from the asset's source (see `group_of`), so the same display
-/// grouping is NOT stored in cached market data.
+/// grouping is NOT stored in cached market data. Also the section vocabulary of the
+/// structured JSON output (`platform::data`), keeping one source of truth for grouping.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
-enum TooltipGroup {
+pub(crate) enum TooltipGroup {
     Crypto,
     FiatArs,
     AccionesAr,
@@ -361,7 +425,7 @@ enum TooltipGroup {
     Forex,
 }
 
-const GROUP_ORDER: [TooltipGroup; 11] = [
+pub(crate) const GROUP_ORDER: [TooltipGroup; 11] = [
     TooltipGroup::Crypto,
     TooltipGroup::FiatArs,
     TooltipGroup::AccionesAr,
@@ -376,7 +440,7 @@ const GROUP_ORDER: [TooltipGroup; 11] = [
 ];
 
 impl TooltipGroup {
-    fn label(self) -> &'static str {
+    pub(crate) fn label(self) -> &'static str {
         match self {
             TooltipGroup::Crypto => "Crypto",
             TooltipGroup::FiatArs => "Fiat · ARS",
@@ -391,7 +455,8 @@ impl TooltipGroup {
             TooltipGroup::Forex => "Forex",
         }
     }
-    fn glyph(self) -> &'static str {
+    /// Nerd-glyph for the class. Shared with the structured JSON output (`platform::data`).
+    pub(crate) fn glyph(self) -> &'static str {
         match self {
             TooltipGroup::Crypto => "\u{f15a}",      // bitcoin
             TooltipGroup::FiatArs => "\u{f155}",     // dollar
@@ -431,11 +496,11 @@ impl TooltipGroup {
     }
 }
 
-fn group_of(src: &AssetSource) -> TooltipGroup {
+pub(crate) fn group_of(src: &AssetSource) -> TooltipGroup {
     match src {
         AssetSource::Coingecko { .. } => TooltipGroup::Crypto,
         AssetSource::Dolarapi { .. } => TooltipGroup::FiatArs,
-        AssetSource::Stooq { .. } | AssetSource::Finnhub { .. } | AssetSource::Cnbc { .. } => {
+        AssetSource::Finnhub { .. } | AssetSource::Cnbc { .. } => {
             TooltipGroup::Stocks
         }
         AssetSource::Commodity { .. } => TooltipGroup::Commodities,
@@ -457,7 +522,6 @@ enum TooltipLine {
         continued: bool,
     },
     Row {
-        group: TooltipGroup,
         text: String,
     },
 }
@@ -492,7 +556,7 @@ fn build_tooltip(
         .unwrap_or(0);
     let change_w = quotes
         .iter()
-        .map(|q| waybar::visible_len(&fmt_change(q.change_pct)))
+        .map(|q| waybar::visible_len(&fmt_change(q.change_pct, q.direction)))
         .max()
         .unwrap_or(0);
     let widths = ColWidths {
@@ -519,42 +583,55 @@ fn build_tooltip(
             .or_insert(closed_now);
     }
 
-    // Flat list of structured lines, grouped by section in a fixed order.
-    let mut lines: Vec<TooltipLine> = Vec::new();
-    for group in GROUP_ORDER {
-        let members: Vec<&Quote> = assets
-            .iter()
-            .zip(quotes)
-            .filter(|(a, _)| group_of(&a.source) == group)
-            .map(|(_, q)| q)
-            .collect();
-        if members.is_empty() {
-            continue;
-        }
-        lines.push(TooltipLine::Header {
-            group,
-            continued: false,
-        });
-        for q in members {
-            lines.push(TooltipLine::Row {
-                group,
-                text: render_row(q, group, display.tooltip_range, &widths, now, colors),
-            });
-        }
-    }
-    if lines.is_empty() {
-        lines.push(TooltipLine::Row {
-            group: TooltipGroup::Crypto,
-            text: waybar::fg(&colors.dim, "    no assets configured"),
-        });
-    }
+    // Grouped member quotes in the fixed section order (non-empty groups only) — the
+    // same grouped shape the packing plan indexes into.
+    let grouped: Vec<(TooltipGroup, Vec<&Quote>)> = GROUP_ORDER
+        .into_iter()
+        .filter_map(|group| {
+            let members: Vec<&Quote> = assets
+                .iter()
+                .zip(quotes)
+                .filter(|(a, _)| group_of(&a.source) == group)
+                .map(|(_, q)| q)
+                .collect();
+            (!members.is_empty()).then_some((group, members))
+        })
+        .collect();
 
-    // Split into columns if configured.
-    let n = display.tooltip_rows_per_column;
-    let columns: Vec<Vec<TooltipLine>> = if n == 0 || lines.len() <= n {
-        vec![lines]
+    // Column packing comes from the ONE shared plan (`pack_columns`) — the same
+    // function the structured JSON exposes to other frontends.
+    let columns: Vec<Vec<TooltipLine>> = if grouped.is_empty() {
+        vec![vec![TooltipLine::Row {
+            text: waybar::fg(&colors.dim, "    no assets configured"),
+        }]]
     } else {
-        chunk_columns(lines, n)
+        let sizes: Vec<usize> = grouped.iter().map(|(_, m)| m.len()).collect();
+        pack_columns(&sizes, display.tooltip_rows_per_column)
+            .iter()
+            .map(|col| {
+                let mut out: Vec<TooltipLine> = Vec::new();
+                for seg in col {
+                    let (group, members) = &grouped[seg.group];
+                    out.push(TooltipLine::Header {
+                        group: *group,
+                        continued: seg.continued,
+                    });
+                    for q in &members[seg.start..seg.start + seg.len] {
+                        out.push(TooltipLine::Row {
+                            text: render_row(
+                                q,
+                                *group,
+                                display.tooltip_range,
+                                &widths,
+                                now,
+                                colors,
+                            ),
+                        });
+                    }
+                }
+                out
+            })
+            .collect()
     };
 
     // Render each column to padded strings, then join side-by-side.
@@ -581,13 +658,8 @@ fn build_tooltip(
     };
     // Cap columns per band; extra columns wrap into a new band stacked below (narrow/vertical
     // monitors). When not banding, keep per-column widths so the layout is unchanged.
-    let max_cols = display.tooltip_max_columns;
-    let banding = max_cols > 0 && col_strs.len() > max_cols;
-    let band_size = if banding {
-        max_cols
-    } else {
-        col_strs.len().max(1)
-    };
+    let band_size = band_size(col_strs.len(), display.tooltip_max_columns);
+    let banding = band_size < col_strs.len();
     let uniform_w = col_strs
         .iter()
         .flat_map(|c| c.iter())
@@ -625,11 +697,40 @@ fn build_tooltip(
     // Frame.
     let title = waybar::bold_fg(&colors.accent, "tickerbar");
     let local = now.with_timezone(&chrono::Local);
-    // Plain mode drops the Nerd clock glyph (it sits on a measured line).
-    let clock = if frame { "\u{f017}  " } else { "" };
+    // House freshness footer: the clock glyph (nf-md-clock_outline) and
+    // "Updated HH:MM", the same closing line every sibling widget uses in both
+    // frontends. Plain mode keeps the glyph too — it has no right edge for a
+    // mismeasured advance to push out of true.
+    // Lifecycle suffix, matching the Omarchy panel's footer: the timestamp says
+    // WHEN, and a non-fresh snapshot says WHY right after it. Without this the
+    // Waybar tooltip claimed a plain "Updated HH:MM" for prices the fetch could
+    // not refresh — the class field carried the fact, but nothing visible did.
+    // The tooltip shows every asset, so the lifecycle here is the whole set's.
+    let lifecycle = {
+        let all_missing = quotes.iter().all(|q| q.price.is_none());
+        let any_missing = quotes.iter().any(|q| q.price.is_none());
+        let any_stale = quotes.iter().any(|q| q.state == QuoteState::Stale);
+        if all_missing && !quotes.is_empty() {
+            Some("error")
+        } else if any_missing {
+            Some("partial")
+        } else if any_stale {
+            Some("stale")
+        } else {
+            None
+        }
+    };
+    let footer_suffix = match lifecycle {
+        Some("partial") => " · partial data".to_string(),
+        Some(other) => format!(" · {other}"),
+        None => String::new(),
+    };
     let footer = waybar::fg(
         &colors.dim,
-        &format!("  {clock}Updated {}", local.format("%H:%M")),
+        &format!(
+            "  \u{f0150}  Updated {}{footer_suffix}",
+            local.format("%H:%M")
+        ),
     );
     let mut measurable: Vec<&str> = bands.iter().flatten().map(|s| s.as_str()).collect();
     measurable.push(footer.as_str());
@@ -743,6 +844,18 @@ struct ColWidths {
     change: usize,
 }
 
+/// The colour a quote's `direction` paints in. THE single source of truth: the Waybar
+/// renderer paints with it and `platform::data` publishes it in the structured document's
+/// `palette`, so no frontend has to re-derive direction colours from an accent and the two
+/// frontends cannot disagree about the same number.
+pub fn direction_color(d: Option<Direction>, colors: &ThemeColors) -> &str {
+    match d {
+        Some(Direction::Up) => &colors.green,
+        Some(Direction::Down) => &colors.red,
+        _ => &colors.text,
+    }
+}
+
 fn render_row(
     q: &Quote,
     group: TooltipGroup,
@@ -751,17 +864,13 @@ fn render_row(
     now: DateTime<Utc>,
     colors: &ThemeColors,
 ) -> String {
-    let dir_color = match q.direction {
-        Some(Direction::Up) => &colors.green,
-        Some(Direction::Down) => &colors.red,
-        _ => &colors.text,
-    };
+    let dir_color = direction_color(q.direction, colors);
     let label = pad_right(
         &waybar::bold_fg(&colors.text, &waybar::pango_escape(&q.label)),
         w.label,
     );
     let price = pad_left(&waybar::fg(dir_color, &fmt_value(q.price, group)), w.price);
-    let change_plain = fmt_change(q.change_pct);
+    let change_plain = fmt_change(q.change_pct, q.direction);
     let change = if change_plain.is_empty() {
         pad_left("", w.change)
     } else {
@@ -795,47 +904,117 @@ fn render_row(
     format!("    {}  {}  {}{}", label, price, change, note)
 }
 
-/// Split lines into columns of ~`n` lines, avoiding a column that ends on a section header
-/// and inserting a `(cont.)` header when a section spills into the next column.
-fn chunk_columns(lines: Vec<TooltipLine>, n: usize) -> Vec<Vec<TooltipLine>> {
-    let mut cols: Vec<Vec<TooltipLine>> = Vec::new();
-    let mut cur: Vec<TooltipLine> = Vec::new();
-    for l in lines {
-        if cur.len() >= n {
-            cols.push(std::mem::take(&mut cur));
-        }
-        cur.push(l);
+/// One packed run of consecutive rows from a single (non-empty) display group inside one
+/// wrapped column. `group` indexes the grouped list the plan was computed from, `start`/`len`
+/// select the run of that group's rows, and `continued` marks a section that spilled over
+/// from the previous column (rendered as a "(cont.)" header).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct PackedSegment {
+    pub group: usize,
+    pub start: usize,
+    pub len: usize,
+    pub continued: bool,
+}
+
+/// THE column-packing logic, shared by every frontend (the waybar tooltip renders it, the
+/// structured JSON exposes it verbatim). Splits grouped rows into wrapped columns of
+/// ~`rows_per_column` lines (1 header line per group + 1 line per row), with the rules:
+/// a column never ends on a header (it moves to the next column's top; columns emptied by
+/// that move are dropped), and a column starting mid-section opens a `continued` segment.
+/// `rows_per_column == 0` (or fewer total lines than the budget) = single column.
+pub(crate) fn pack_columns(
+    group_sizes: &[usize],
+    rows_per_column: usize,
+) -> Vec<Vec<PackedSegment>> {
+    #[derive(Clone, Copy)]
+    enum Ln {
+        Header(usize),
+        Row(usize, usize),
     }
-    if !cur.is_empty() {
-        cols.push(cur);
+    let mut lines: Vec<Ln> = Vec::new();
+    for (g, &size) in group_sizes.iter().enumerate() {
+        if size == 0 {
+            continue;
+        }
+        lines.push(Ln::Header(g));
+        for r in 0..size {
+            lines.push(Ln::Row(g, r));
+        }
+    }
+    if lines.is_empty() {
+        return Vec::new();
+    }
+
+    let n = rows_per_column;
+    let mut cols: Vec<Vec<Ln>> = Vec::new();
+    if n == 0 || lines.len() <= n {
+        cols.push(lines);
+    } else {
+        let mut cur: Vec<Ln> = Vec::new();
+        for l in lines {
+            if cur.len() >= n {
+                cols.push(std::mem::take(&mut cur));
+            }
+            cur.push(l);
+        }
+        if !cur.is_empty() {
+            cols.push(cur);
+        }
     }
     // A column must not end on a header — push a trailing header to the next column.
     let last = cols.len().saturating_sub(1);
     for i in 0..last {
-        if matches!(cols[i].last(), Some(TooltipLine::Header { .. })) {
+        if matches!(cols[i].last(), Some(Ln::Header(_))) {
             let h = cols[i].pop().unwrap();
             cols[i + 1].insert(0, h);
         }
     }
-    // Drop any column emptied by the orphan move (e.g. tooltip_rows_per_column = 1).
+    // Drop any column emptied by the orphan move (e.g. rows_per_column = 1).
     cols.retain(|c| !c.is_empty());
-    // A column that starts mid-section gets a continuation header.
-    for col in cols.iter_mut().skip(1) {
-        let cont_group = match col.first() {
-            Some(TooltipLine::Row { group, .. }) => Some(*group),
-            _ => None,
-        };
-        if let Some(group) = cont_group {
-            col.insert(
-                0,
-                TooltipLine::Header {
-                    group,
-                    continued: true,
-                },
-            );
-        }
+
+    // Compress each column's lines into segments. A row with no open segment for its
+    // group means the section spilled from the previous column => continued header.
+    cols.iter()
+        .map(|col| {
+            let mut segs: Vec<PackedSegment> = Vec::new();
+            for l in col {
+                match *l {
+                    Ln::Header(g) => segs.push(PackedSegment {
+                        group: g,
+                        start: 0,
+                        len: 0,
+                        continued: false,
+                    }),
+                    Ln::Row(g, r) => match segs.last_mut() {
+                        Some(s) if s.group == g && (s.len == 0 || s.start + s.len == r) => {
+                            if s.len == 0 {
+                                s.start = r;
+                            }
+                            s.len += 1;
+                        }
+                        _ => segs.push(PackedSegment {
+                            group: g,
+                            start: r,
+                            len: 1,
+                            continued: true,
+                        }),
+                    },
+                }
+            }
+            segs
+        })
+        .collect()
+}
+
+/// Columns per side-by-side band: capped at `max_columns` when positive and exceeded
+/// (extra columns wrap into bands stacked below); otherwise all columns share one band.
+/// Shared by the tooltip renderer and the structured JSON.
+pub(crate) fn band_size(n_cols: usize, max_columns: usize) -> usize {
+    if max_columns > 0 && n_cols > max_columns {
+        max_columns
+    } else {
+        n_cols.max(1)
     }
-    cols
 }
 
 #[cfg(test)]
@@ -910,7 +1089,7 @@ mod tests {
 
     #[test]
     fn avg_change_excludes_quotes_without_a_usable_change() {
-        // valid price but change_pct=None (price-only providers like dolarapi/frankfurter/stooq)
+        // valid price but change_pct=None (price-only providers like dolarapi/frankfurter)
         let qs = vec![
             quote_chg("A", Some(4.0)),
             quote_chg("PRICEONLY", None),
@@ -954,10 +1133,12 @@ mod tests {
     }
 
     #[test]
-    fn a_flat_summary_is_left_unspanned() {
+    fn a_flat_summary_is_left_unspanned_and_unsigned() {
         let c = ThemeColors::default();
         let out = render_summary(0.0, "{avg_change}", &IconSet::Ascii, &c);
-        assert_eq!(out, "+0.00%"); // no <span> wrapper
+        // No <span> wrapper, and no `+` claiming a gain. The bar summary is free-flowing
+        // text (not a measured column), so `render_summary`'s trim drops the pad space.
+        assert_eq!(out, "0.00%");
     }
 
     #[test]
@@ -1038,7 +1219,7 @@ mod tests {
         let mut d = disp(DisplayMode::Fixed, 0); // max_on_bar=0 -> no visible assets
         d.summary_format = "AVG{avg_change}".into();
         let text = bar_text(&assets_for(&qs), &qs, &d, 0, &ThemeColors::default());
-        assert_eq!(text, "AVG+0.00%"); // no leading/trailing spaces, no dangling separator
+        assert_eq!(text, "AVG 0.00%"); // no leading/trailing spaces, no dangling separator
     }
 
     // ---- bar selection (`bar`) + layout (`bar_layout`) ----
@@ -1199,7 +1380,13 @@ mod tests {
         ];
         let mut d = disp(DisplayMode::Fixed, 3);
         d.bar = vec!["UP1".to_string(), "UP2".to_string()]; // excludes the Down asset
-        let out = build(&cfg_with(d, &qs), &qs, Utc::now(), &ThemeColors::default());
+        let out = build(
+            &cfg_with(d, &qs),
+            &qs,
+            Utc::now(),
+            &ThemeColors::default(),
+            ColorMode::FULL,
+        );
         assert!(out.class.contains(&"up".to_string()));
         assert!(!out.class.contains(&"mixed".to_string()));
     }
@@ -1211,7 +1398,13 @@ mod tests {
         d.bar = vec!["UP1".to_string()];
         d.summary_format = "AVG{avg_change}".into();
         d.bar_layout = "{summary}".into(); // text shows only the summary
-        let out = build(&cfg_with(d, &qs), &qs, Utc::now(), &ThemeColors::default());
+        let out = build(
+            &cfg_with(d, &qs),
+            &qs,
+            Utc::now(),
+            &ThemeColors::default(),
+            ColorMode::FULL,
+        );
         assert!(out.class.contains(&"up".to_string()));
     }
 
@@ -1254,10 +1447,17 @@ mod tests {
             &qs,
             now,
             &ThemeColors::default(),
+            ColorMode::FULL,
         );
         assert!(only_stock.class.contains(&"closed".to_string()));
         // No bar subset => BTC (always open) is also on the bar => not all closed.
-        let all = build(&mk(vec![]), &qs, now, &ThemeColors::default());
+        let all = build(
+            &mk(vec![]),
+            &qs,
+            now,
+            &ThemeColors::default(),
+            ColorMode::FULL,
+        );
         assert!(!all.class.contains(&"closed".to_string()));
     }
 
@@ -1459,15 +1659,15 @@ mod tests {
             },
             Asset {
                 label: "AAPL".into(),
-                source: AssetSource::Stooq {
-                    symbol: "aapl.us".into(),
+                source: AssetSource::Cnbc {
+                    symbol: "AAPL".into(),
                 },
             },
         ];
         let qs = vec![
             quote("BTC", Some(68000.0), Some(Direction::Up), QuoteState::Fresh),
             Quote {
-                source: ProviderKind::Stooq,
+                source: ProviderKind::Cnbc,
                 ..quote("AAPL", Some(201.5), None, QuoteState::Fresh)
             },
         ];
@@ -1488,62 +1688,69 @@ mod tests {
         assert!(tip.contains("Updated"));
     }
 
-    // ---- multi-column helpers ----
+    // ---- shared column-packing plan (pack_columns) ----
 
-    fn header(g: TooltipGroup) -> TooltipLine {
-        TooltipLine::Header {
-            group: g,
-            continued: false,
+    fn seg(group: usize, start: usize, len: usize, continued: bool) -> PackedSegment {
+        PackedSegment {
+            group,
+            start,
+            len,
+            continued,
         }
-    }
-    fn row(g: TooltipGroup) -> TooltipLine {
-        TooltipLine::Row {
-            group: g,
-            text: "x".into(),
-        }
-    }
-    fn ends_with_header(col: &[TooltipLine]) -> bool {
-        matches!(col.last(), Some(TooltipLine::Header { .. }))
     }
 
     #[test]
     fn a_column_never_ends_on_a_header() {
-        // naive chunk of [R,R,H,R] by 3 would put H last in column 0.
-        let lines = vec![
-            row(TooltipGroup::Crypto),
-            row(TooltipGroup::Crypto),
-            header(TooltipGroup::Stocks),
-            row(TooltipGroup::Stocks),
-        ];
-        let cols = chunk_columns(lines, 3);
-        assert!(cols.iter().all(|c| !ends_with_header(c)));
+        // Two 1-row groups with a 3-line budget: naive chunking would strand the second
+        // group's header at the bottom of column 0; it must move to column 1's top.
+        let cols = pack_columns(&[1, 1], 3);
+        assert_eq!(
+            cols,
+            vec![vec![seg(0, 0, 1, false)], vec![seg(1, 0, 1, false)]]
+        );
+        // No zero-length (header-only) segment may survive anywhere.
+        assert!(cols.iter().flatten().all(|s| s.len > 0));
     }
 
     #[test]
-    fn a_section_split_across_columns_gets_a_continuation_header() {
-        // [H, R, R, R] by 2 -> column 1 starts mid-section -> gets a continued header.
-        let lines = vec![
-            header(TooltipGroup::On),
-            row(TooltipGroup::On),
-            row(TooltipGroup::On),
-            row(TooltipGroup::On),
-        ];
-        let cols = chunk_columns(lines, 2);
-        assert!(cols.len() >= 2);
-        assert!(matches!(
-            cols[1].first(),
-            Some(TooltipLine::Header {
-                continued: true,
-                ..
-            })
-        ));
+    fn a_section_split_across_columns_gets_a_continuation_segment() {
+        // One 3-row group with a 2-line budget: [H, R0] | [R1, R2] -> the second column
+        // starts mid-section and must open a continued segment covering rows 1..3.
+        let cols = pack_columns(&[3], 2);
+        assert_eq!(
+            cols,
+            vec![vec![seg(0, 0, 1, false)], vec![seg(0, 1, 2, true)]]
+        );
     }
 
     #[test]
-    fn a_single_row_per_column_does_not_produce_empty_columns() {
-        let lines = vec![header(TooltipGroup::Crypto), row(TooltipGroup::Crypto)];
-        let cols = chunk_columns(lines, 1);
-        assert!(cols.iter().all(|c| !c.is_empty()));
+    fn a_single_line_per_column_does_not_produce_empty_columns() {
+        // Budget 1: [H] | [R] -> the orphan move empties column 0, which must be dropped.
+        let cols = pack_columns(&[1], 1);
+        assert_eq!(cols, vec![vec![seg(0, 0, 1, false)]]);
+    }
+
+    #[test]
+    fn zero_budget_or_small_content_packs_a_single_column() {
+        // rows_per_column = 0 keeps the waybar single-column semantics.
+        assert_eq!(
+            pack_columns(&[2, 1], 0),
+            vec![vec![seg(0, 0, 2, false), seg(1, 0, 1, false)]]
+        );
+        // Fewer total lines (5) than the budget (10) also stays single-column.
+        assert_eq!(pack_columns(&[2, 1], 10).len(), 1);
+        // No groups -> no columns.
+        assert!(pack_columns(&[], 4).is_empty());
+        // Empty groups are skipped without shifting the indices of later groups.
+        assert_eq!(pack_columns(&[0, 2], 0), vec![vec![seg(1, 0, 2, false)]]);
+    }
+
+    #[test]
+    fn band_size_caps_columns_only_when_exceeded() {
+        assert_eq!(band_size(5, 3), 3); // banding kicks in
+        assert_eq!(band_size(3, 3), 3); // exactly at the cap: one band
+        assert_eq!(band_size(2, 0), 2); // unlimited
+        assert_eq!(band_size(0, 0), 1); // degenerate floor
     }
 
     #[test]
@@ -1687,5 +1894,172 @@ mod tests {
             row_widths.windows(2).all(|w| w[0] == w[1]),
             "plain data rows stay aligned"
         );
+    }
+
+    // ---- Flat change formatting --------------------------------------------------------
+
+    #[test]
+    fn a_flat_change_renders_unsigned_so_it_never_reads_as_a_gain() {
+        assert_eq!(fmt_change(Some(0.0), Some(Direction::Flat)), " 0.00%");
+        // Negative zero must not leak a minus sign either.
+        assert_eq!(fmt_change(Some(-0.0), Some(Direction::Flat)), " 0.00%");
+    }
+
+    #[test]
+    fn a_move_that_rounds_to_zero_keeps_its_real_sign() {
+        // The direction is the model's, not the rounded text's: a tiny-but-nonzero move
+        // still moved, so it keeps the sign that says which way.
+        assert_eq!(fmt_change(Some(0.004), Some(Direction::Up)), "+0.00%");
+        assert_eq!(fmt_change(Some(-0.004), Some(Direction::Down)), "-0.00%");
+    }
+
+    #[test]
+    fn a_flat_change_measures_the_same_width_as_a_signed_one() {
+        let flat = fmt_change(Some(0.0), Some(Direction::Flat));
+        let up = fmt_change(Some(1.0), Some(Direction::Up));
+        assert_eq!(waybar::visible_len(&flat), waybar::visible_len(&up));
+    }
+
+    #[test]
+    fn a_flat_row_stays_column_aligned_with_a_signed_one() {
+        let qs = vec![quote_chg("FLAT", Some(0.0)), quote_chg("RISE", Some(1.50))];
+        let cfg = cfg_with(disp(DisplayMode::Fixed, 5), &qs);
+        let out = build(
+            &cfg,
+            &qs,
+            Utc::now(),
+            &ThemeColors::default(),
+            ColorMode::NONE,
+        );
+
+        let rows: Vec<&str> = out
+            .tooltip
+            .lines()
+            .filter(|l| l.contains("FLAT") || l.contains("RISE"))
+            .collect();
+        assert_eq!(rows.len(), 2);
+        assert!(out.tooltip.contains(" 0.00%"), "flat row is unsigned");
+        assert!(out.tooltip.contains("+1.50%"), "the mover keeps its sign");
+        assert_eq!(
+            waybar::visible_len(rows[0]),
+            waybar::visible_len(rows[1]),
+            "the pad space keeps the change column aligned"
+        );
+    }
+
+    // ---- Monochrome (`--no-color`) -----------------------------------------------------
+
+    /// Everything the reader actually sees: the markup with all tags removed.
+    fn strip_tags(s: &str) -> String {
+        let mut out = String::new();
+        let mut in_tag = false;
+        for ch in s.chars() {
+            match ch {
+                '<' => in_tag = true,
+                '>' if in_tag => in_tag = false,
+                _ if !in_tag => out.push(ch),
+                _ => {}
+            }
+        }
+        out
+    }
+
+    /// Both directions plus the framed tooltip, so borders, header, rows and footer are
+    /// all exercised.
+    fn two_way_market() -> (Config, Vec<Quote>) {
+        let qs = vec![quote_chg("UP", Some(1.50)), quote_chg("DOWN", Some(-2.25))];
+        let mut d = disp(DisplayMode::Fixed, 5);
+        d.bar_format = "{label} {price} {arrow}{change_pct}".into();
+        d.frame = true;
+        (cfg_with(d, &qs), qs)
+    }
+
+    fn built(mode: ColorMode) -> WaybarOutput {
+        let (cfg, qs) = two_way_market();
+        build(&cfg, &qs, Utc::now(), &ThemeColors::default(), mode)
+    }
+
+    /// Both surfaces from ONE market and ONE instant, so nothing but the palette differs.
+    fn built_pair() -> (WaybarOutput, WaybarOutput) {
+        let (cfg, qs) = two_way_market();
+        let now = Utc::now();
+        let theme = ThemeColors::default();
+        (
+            build(&cfg, &qs, now, &theme, ColorMode::FULL),
+            build(&cfg, &qs, now, &theme, ColorMode::NONE),
+        )
+    }
+
+    #[test]
+    fn both_surfaces_carry_color_by_default() {
+        assert_eq!(ColorMode::default(), ColorMode::FULL);
+        let out = built(ColorMode::FULL);
+        assert!(out.text.contains("foreground="));
+        assert!(out.tooltip.contains("foreground="));
+    }
+
+    #[test]
+    fn monochrome_leaves_no_color_markup_on_either_surface() {
+        let out = built(ColorMode::NONE);
+
+        assert!(!out.text.contains("foreground="), "bar: {}", out.text);
+        assert!(!out.text.contains('#'), "no inline hex on the bar");
+        assert!(!out.tooltip.contains("foreground="));
+        assert!(!out.tooltip.contains('#'), "no inline hex in the tooltip");
+    }
+
+    #[test]
+    fn a_monochrome_bar_keeps_the_tooltip_colored() {
+        let out = built(ColorMode::PLAIN_BAR);
+
+        assert!(!out.text.contains("foreground="));
+        assert!(out.tooltip.contains("foreground="));
+    }
+
+    #[test]
+    fn a_monochrome_tooltip_keeps_the_bar_colored() {
+        let out = built(ColorMode::PLAIN_TOOLTIP);
+
+        assert!(out.text.contains("foreground="));
+        assert!(!out.tooltip.contains("foreground="));
+    }
+
+    #[test]
+    fn monochrome_keeps_the_module_class_so_it_can_be_styled_from_css() {
+        let (colored, plain) = built_pair();
+
+        assert_eq!(colored.class, plain.class);
+        assert_eq!(colored.alt, plain.alt);
+        assert!(plain
+            .class
+            .iter()
+            .any(|c| c == "mixed" || c == "up" || c == "down"));
+    }
+
+    #[test]
+    fn monochrome_keeps_the_structure_glyphs_and_the_direction_sign() {
+        let plain = built(ColorMode::NONE);
+
+        // Box drawing, the bold weight and the ascii arrows all survive.
+        assert!(plain.tooltip.contains('╭') && plain.tooltip.contains('│'));
+        assert!(plain.tooltip.contains("font_weight='bold'"));
+        assert!(plain.text.contains('^') && plain.text.contains('v'));
+        // Direction stays readable in the tooltip through the signed change column,
+        // which is the only direction carrier there (the column has no glyph by design).
+        assert!(plain.tooltip.contains("+1.50%"));
+        assert!(plain.tooltip.contains("-2.25%"));
+    }
+
+    #[test]
+    fn column_widths_do_not_shift_when_the_spans_are_absent() {
+        let (colored, plain) = built_pair();
+
+        // Same visible text, character for character: padding was measured with
+        // `visible_len`, which never counted the tags in the first place.
+        assert_eq!(strip_tags(&colored.tooltip), strip_tags(&plain.tooltip));
+        assert_eq!(strip_tags(&colored.text), strip_tags(&plain.text));
+
+        let widths = |s: &str| -> Vec<usize> { s.lines().map(waybar::visible_len).collect() };
+        assert_eq!(widths(&colored.tooltip), widths(&plain.tooltip));
     }
 }

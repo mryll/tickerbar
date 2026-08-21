@@ -67,13 +67,46 @@ fn default_icons() -> String {
     "nerd".into()
 }
 fn default_bar_format() -> String {
-    "{label} {price} {arrow}{change_pct}".into()
+    // The class mark leads, matching the Omarchy plugin's strip and the tooltip
+    // group headers. It was absent here while the README documented it as the
+    // default, so an unconfigured Waybar showed no glyph at all.
+    "{glyph} {label} {price} {arrow}{change_pct}".into()
 }
 fn default_bar_layout() -> String {
     "{summary}   {bar}".into()
 }
 fn default_frame_font() -> String {
     "JetBrainsMono Nerd Font Mono".into()
+}
+
+impl Display {
+    /// Merge frontend-supplied layout overrides (the `--rows-per-column` / `--max-columns`
+    /// CLI flags) into the config, so every downstream consumer — waybar tooltip and
+    /// structured JSON alike — packs columns through the exact same values:
+    /// - `rows_per_column`: an explicit config value (> 0) always wins; the override only
+    ///   fills in when the config leaves it 0 (frontends pass their measured line budget).
+    /// - `max_columns`: the smaller of the two positive values wins (a frontend can only
+    ///   shrink what fits side by side, never widen past the config).
+    pub fn apply_layout_overrides(
+        &mut self,
+        rows_per_column: Option<usize>,
+        max_columns: Option<usize>,
+    ) {
+        if let Some(n) = rows_per_column {
+            if self.tooltip_rows_per_column == 0 && n > 0 {
+                self.tooltip_rows_per_column = n;
+            }
+        }
+        if let Some(m) = max_columns {
+            if m > 0 {
+                self.tooltip_max_columns = if self.tooltip_max_columns > 0 {
+                    self.tooltip_max_columns.min(m)
+                } else {
+                    m
+                };
+            }
+        }
+    }
 }
 
 impl Default for Display {
@@ -149,13 +182,23 @@ pub struct Config {
 
 impl Config {
     pub fn parse_str(s: &str) -> Result<Config, String> {
+        // Retired providers get a named error instead of serde's "unknown variant", so a
+        // config written against an older release says what to do rather than what broke.
+        // Stooq's quote endpoint (/q/l/) answers 404 since 2026 and the rest of the site is
+        // behind a JavaScript proof-of-work gate, so there is no CLI-reachable feed left.
+        if s.contains("\"stooq\"") {
+            return Err(
+                "provider 'stooq' was removed: its quote endpoint is gone (HTTP 404). \
+                 Use provider = \"cnbc\" for stocks (no API key, e.g. symbol = \"AAPL\")."
+                    .into(),
+            );
+        }
         let cfg: Config = toml::from_str(s).map_err(|e| format!("config parse error: {e}"))?;
         // Catch typoed provider keys in [market_hours.providers] instead of ignoring them.
         // Keep in sync with ProviderKind::as_str.
         const KNOWN_PROVIDERS: &[&str] = &[
             "coingecko",
             "dolarapi",
-            "stooq",
             "frankfurter",
             "finnhub",
             "cnbc",
@@ -260,6 +303,42 @@ side = "sell"
         let cfg = Config::parse_str(ok).unwrap();
         assert!(!cfg.market_hours.applies_to("cnbc"));
         assert!(cfg.market_hours.applies_to("coingecko"));
+    }
+
+    #[test]
+    fn layout_overrides_fill_auto_rows_but_never_beat_an_explicit_config() {
+        let mut d = Display::default(); // rows_per_column = 0 (auto for frontends)
+        d.apply_layout_overrides(Some(20), None);
+        assert_eq!(d.tooltip_rows_per_column, 20);
+
+        let mut pinned = Display {
+            tooltip_rows_per_column: 14,
+            ..Display::default()
+        };
+        pinned.apply_layout_overrides(Some(20), None);
+        assert_eq!(pinned.tooltip_rows_per_column, 14, "explicit config wins");
+
+        // A zero override is a no-op (0/absent = config value).
+        let mut zero = Display::default();
+        zero.apply_layout_overrides(Some(0), Some(0));
+        assert_eq!(zero.tooltip_rows_per_column, 0);
+        assert_eq!(zero.tooltip_max_columns, 0);
+    }
+
+    #[test]
+    fn max_columns_override_takes_the_smaller_positive_value() {
+        let mut d = Display {
+            tooltip_max_columns: 3,
+            ..Display::default()
+        };
+        d.apply_layout_overrides(None, Some(2));
+        assert_eq!(d.tooltip_max_columns, 2, "frontend can shrink");
+        d.apply_layout_overrides(None, Some(5));
+        assert_eq!(d.tooltip_max_columns, 2, "frontend cannot widen");
+
+        let mut unlimited = Display::default(); // max_columns = 0
+        unlimited.apply_layout_overrides(None, Some(4));
+        assert_eq!(unlimited.tooltip_max_columns, 4);
     }
 
     #[test]

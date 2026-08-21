@@ -4,7 +4,6 @@ pub mod data912;
 pub mod dolarapi;
 pub mod finnhub;
 pub mod frankfurter;
-pub mod stooq;
 
 use std::collections::BTreeMap;
 
@@ -20,7 +19,6 @@ fn ttl(kind: ProviderKind) -> Duration {
     match kind {
         ProviderKind::CoinGecko => Duration::seconds(60),
         ProviderKind::DolarApi => Duration::seconds(600),
-        ProviderKind::Stooq => Duration::seconds(600),
         ProviderKind::Frankfurter => Duration::seconds(3600),
         ProviderKind::Finnhub => Duration::seconds(60),
         ProviderKind::Cnbc => Duration::seconds(120),
@@ -37,7 +35,6 @@ fn fetch_kind(
     match kind {
         ProviderKind::CoinGecko => coingecko::fetch(assets, http, now),
         ProviderKind::DolarApi => dolarapi::fetch(assets, http, now),
-        ProviderKind::Stooq => stooq::fetch(assets, http, now),
         ProviderKind::Frankfurter => frankfurter::fetch(assets, http, now),
         ProviderKind::Finnhub => finnhub::fetch(assets, http, now),
         ProviderKind::Cnbc => cnbc::fetch(assets, http, now),
@@ -154,10 +151,10 @@ mod tests {
             },
         }
     }
-    fn st(label: &str, sym: &str) -> Asset {
+    fn cb(label: &str, sym: &str) -> Asset {
         Asset {
             label: label.into(),
-            source: AssetSource::Stooq { symbol: sym.into() },
+            source: AssetSource::Cnbc { symbol: sym.into() },
         }
     }
 
@@ -165,12 +162,12 @@ mod tests {
     fn assets_are_grouped_by_provider_preserving_order() {
         let assets = vec![
             cg("BTC", "bitcoin"),
-            st("AAPL", "aapl.us"),
+            cb("AAPL", "AAPL"),
             cg("ETH", "ethereum"),
         ];
         let g = group_indexed(&assets);
         assert_eq!(g[&ProviderKind::CoinGecko], vec![0, 2]);
-        assert_eq!(g[&ProviderKind::Stooq], vec![1]);
+        assert_eq!(g[&ProviderKind::Cnbc], vec![1]);
     }
 
     #[test]
@@ -191,7 +188,7 @@ mod tests {
 
     #[test]
     fn assemble_places_quotes_in_config_order_and_restamps_labels() {
-        let assets = vec![cg("BTC", "bitcoin"), st("AAPL", "aapl.us")];
+        let assets = vec![cg("BTC", "bitcoin"), cb("AAPL", "AAPL")];
         let now = Utc::now();
         let mut qcg = Quote::unavailable(&assets[0], QuoteState::Fresh, now);
         qcg.label = "OLD".into();

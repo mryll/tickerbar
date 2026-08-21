@@ -1,0 +1,453 @@
+#!/usr/bin/env bash
+# demo-data — a stand-in for the `tickerbar` binary that emits a fixed, fully
+# populated demo watchlist, for README screenshots.
+#
+# Put this directory first on PATH and both frontends feed themselves from it:
+#
+#   PATH="$PWD/screenshots/demo:$PATH" waybar
+#   PATH="$PWD/screenshots/demo:$PATH" omarchy-shell
+#
+# It impersonates the real CLI's surface: `--output json` prints the structured
+# document, anything else prints the waybar module JSON for the SAME data, and
+# `--no-color[=all|bar|tooltip]` / `NO_COLOR` behave as they do in the binary —
+# an unknown --no-color value produces the same argument-error document it does.
+# The palette comes from the REAL binary (it is asked for its resolved `palette`),
+# so screenshots pick up whatever theme is active without duplicating the theme
+# chain here. All timestamps are computed at run time. The watchlist is invented:
+# it contains no real portfolio.
+set -euo pipefail
+
+output_json=0
+no_color=""          # "" | all | bar | tooltip
+frame=0
+bad_args=0
+prev=""
+for arg in "$@"; do
+  case "$arg" in
+    --output=json)             output_json=1 ;;
+    json)                      [[ "$prev" == "--output" ]] && output_json=1 ;;
+    --no-color|--no-color=all) no_color="all" ;;
+    --no-color=bar)            no_color="bar" ;;
+    --no-color=tooltip)        no_color="tooltip" ;;
+    # An unknown value is an argument error in the real CLI, and the scope it could
+    # not parse is no scope at all — so NO_COLOR decides, exactly as the binary's
+    # argv pre-scan does. Reproduced here rather than papered over.
+    --no-color=*)              bad_args=1 ;;
+    --frame)                   frame=1 ;;
+  esac
+  prev="$arg"
+done
+# https://no-color.org — any non-empty value, and an explicit flag still wins.
+if [[ -z "$no_color" && -n "${NO_COLOR:-}" ]]; then no_color="all"; fi
+
+# The palette (theme chain, direction semantics) is production logic, so ask the REAL
+# binary for it instead of reimplementing it: find it on PATH with this directory
+# removed, so the lookup does not just find this script again.
+self_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
+clean_path=""
+IFS=: read -ra _path_dirs <<< "${PATH:-}"
+for d in "${_path_dirs[@]}"; do
+  [[ -z "$d" ]] && continue
+  [[ "$(cd -- "$d" 2>/dev/null && pwd -P)" == "$self_dir" ]] && continue
+  clean_path="${clean_path:+$clean_path:}$d"
+done
+real_bin=$(PATH="$clean_path" command -v tickerbar 2>/dev/null || true)
+
+DEMO_OUTPUT_JSON="$output_json" DEMO_NO_COLOR="$no_color" DEMO_BAD_ARGS="$bad_args" \
+DEMO_FRAME="$frame" DEMO_REAL_BIN="$real_bin" exec python3 - <<'PY'
+import json, os, subprocess, sys, time
+from datetime import datetime, timezone
+
+WANT_JSON = os.environ.get("DEMO_OUTPUT_JSON") == "1"
+NO_COLOR = os.environ.get("DEMO_NO_COLOR", "")
+BAD_ARGS = os.environ.get("DEMO_BAD_ARGS") == "1"
+BAR_COLORED = NO_COLOR not in ("all", "bar")
+# `--frame` draws the box, exactly as the real binary's `frame = true` does.
+FRAME = os.environ.get("DEMO_FRAME", "") == "1"
+TIP_COLORED = NO_COLOR not in ("all", "tooltip")
+
+# ---------------------------------------------------------------- theme -----
+# The core publishes the resolved palette (Omarchy -> pywal -> One Dark, plus the
+# direction semantics) in its structured document, so the fixture ASKS the real
+# binary for it rather than reimplementing the chain. A bogus --config keeps that
+# call offline and config-independent; the error document carries the palette too.
+KEYS = ("up", "down", "flat", "text", "dim", "accent", "error")
+ONE_DARK = {"up": "#98c379", "down": "#e06c75", "flat": "#abb2bf", "text": "#abb2bf",
+            "dim": "#5c6370", "accent": "#61afef", "error": "#e06c75"}
+MONO = {k: "" for k in KEYS}
+
+
+def is_hex(v):
+    v = str(v)
+    return v.startswith("#") and len(v) - 1 in (3, 4, 6, 8) and all(
+        c in "0123456789abcdefABCDEF" for c in v[1:])
+
+
+def load_theme():
+    binary = os.environ.get("DEMO_REAL_BIN", "")
+    if binary:
+        try:
+            r = subprocess.run(
+                [binary, "--output", "json", "--config", "/nonexistent/tickerbar-demo.toml"],
+                capture_output=True, text=True, timeout=5)
+            pal = json.loads(r.stdout).get("palette") or {}
+            if all(is_hex(pal.get(k, "")) for k in KEYS):
+                return {k: pal[k] for k in KEYS}
+        except Exception:
+            pass
+    return dict(ONE_DARK)
+
+
+THEME = load_theme()
+
+# ------------------------------------------------------------ demo data -----
+# Invented watchlist. Globally recognisable instruments only — no real holdings.
+NOW = datetime.now(timezone.utc)
+STALE_AGE_S = 14 * 60          # how old the one stale quote is, relative to now
+
+
+def row(label, symbol, price, chg, direction, quote="usd", unit="currency",
+        market="open", state="fresh", low=None, high=None, error=None):
+    r = {"label": label, "symbol": symbol, "price": price, "quote": quote,
+         "change_pct": chg, "direction": direction}
+    if low is not None:
+        r["day_low"] = low
+    if high is not None:
+        r["day_high"] = high
+    r.update({"unit": unit, "market": market, "state": state,
+              "error": {"message": error} if error else None})
+    return r
+
+
+GROUPS = [
+    {"id": "crypto", "label": "Crypto", "glyph": "", "sources": ["coingecko"],
+     "closed": False, "rows": [
+         row("BTC", "bitcoin", 68412.35, 2.14, "up", low=66980.00, high=68905.10),
+         row("ETH", "ethereum", 3241.80, -1.27, "down", low=3198.40, high=3320.75),
+         # The flat row: unsigned change, right next to signed ones.
+         row("SOL", "solana", 172.94, 0.0, "flat", low=171.10, high=175.60),
+         # The stale row: last good quote, kept and marked.
+         row("XRP", "ripple", 0.5382, 0.63, "up", low=0.5290, high=0.5461, state="stale"),
+     ]},
+    # ARS group: shows the second currency on a section header AND a closed market.
+    {"id": "cedears", "label": "CEDEARs", "glyph": "", "sources": ["data912"],
+     "closed": True, "rows": [
+         row("NVDA", "NVDA", 21450.00, 1.85, "up", quote="ars", market="closed"),
+         row("AMZN", "AMZN", 18930.50, -0.42, "down", quote="ars", market="closed"),
+         row("GOOGL", "GOOGL", 9875.25, 0.31, "up", quote="ars", market="closed"),
+     ]},
+    {"id": "stocks", "label": "Stocks", "glyph": "", "sources": ["cnbc"],
+     "closed": False, "rows": [
+         row("AAPL", "AAPL", 228.52, 0.78, "up", low=226.10, high=229.95),
+         # The error row: no price, a message, and the (n/d) note.
+         row("TSLA", "TSLA", None, None, None, quote=None, state="error",
+             error="quote unavailable"),
+     ]},
+    {"id": "indices", "label": "Indices", "glyph": "", "sources": ["cnbc"],
+     "closed": False, "rows": [
+         row("S&P 500", ".SPX", 5631.22, 0.41, "up", low=5602.80, high=5644.10),
+     ]},
+    {"id": "commodities", "label": "Commodities", "glyph": "", "sources": ["cnbc"],
+     "closed": False, "rows": [
+         row("Gold", "XAUUSD", 2412.60, -0.35, "down", low=2404.20, high=2428.90),
+     ]},
+    {"id": "rates", "label": "Rates", "glyph": "", "sources": ["cnbc"],
+     "closed": False, "rows": [
+         row("US 10Y", "US10Y", 4.28, 0.02, "up", unit="percent"),
+     ]},
+    {"id": "forex", "label": "Forex", "glyph": "", "sources": ["frankfurter"],
+     "closed": False, "rows": [
+         row("EUR/USD", "EUR/USD", 1.0864, -0.18, "down"),
+     ]},
+]
+
+ALL_ROWS = [r for g in GROUPS for r in g["rows"]]
+# The real binary publishes the class mark on every row (data.rs), so the demo
+# must too — otherwise the demo screenshots show a bar strip with no glyphs
+# while a real install has them.
+for _g in GROUPS:
+    for _r in _g["rows"]:
+        _r.setdefault("glyph", _g["glyph"])
+BAR_LABELS = ["BTC", "ETH", "AAPL", "Gold"]
+BAR_ROWS = [r for lbl in BAR_LABELS for r in ALL_ROWS if r["label"] == lbl]
+
+changes = [r["change_pct"] for r in ALL_ROWS if r["change_pct"] is not None]
+AVG = round(sum(changes) / len(changes), 10) if changes else None
+
+# Packing plan: bands -> columns -> segments, exactly the shape pack_columns
+# emits. Budget 8 lines/column, max 2 columns per band, so the CEDEARs section
+# splits with a "(cont.)" header and a third column wraps into a second band.
+ROWS_PER_COLUMN, MAX_COLUMNS = 8, 2
+
+
+def seg(group, start, length, continued=False):
+    return {"group": group, "start": start, "len": length, "continued": continued}
+
+
+COLUMNS = [
+    [seg(0, 0, 4), seg(1, 0, 2)],
+    [seg(1, 2, 1, True), seg(2, 0, 2), seg(3, 0, 1)],
+    [seg(4, 0, 1), seg(5, 0, 1), seg(6, 0, 1)],
+]
+BANDS = [COLUMNS[i:i + MAX_COLUMNS] for i in range(0, len(COLUMNS), MAX_COLUMNS)]
+
+# ------------------------------------------------------------ formatting ----
+
+
+def group_thousands(s):
+    intpart, _, frac = s.partition(".")
+    neg = intpart.startswith("-")
+    digits = intpart.lstrip("-")
+    out = ""
+    for i, ch in enumerate(digits):
+        if i and (len(digits) - i) % 3 == 0:
+            out += ","
+        out += ch
+    return ("-" if neg else "") + out + ("." + frac if frac else "")
+
+
+def fmt_price(p):
+    if p is None:
+        return "—"
+    if abs(p) >= 1000:
+        return group_thousands("%.2f" % p)
+    if abs(p) >= 1:
+        return "%.2f" % p
+    return "%.4f" % p
+
+
+def fmt_value(r):
+    return "%.2f%%" % r["price"] if (r["unit"] == "percent" and r["price"] is not None) \
+        else fmt_price(r["price"])
+
+
+def fmt_change(c, direction):
+    if c is None:
+        return ""
+    # Flat renders unsigned (with the pad space) so it never reads as a gain.
+    return " %.2f%%" % abs(c) if direction == "flat" else "%+.2f%%" % c
+
+
+def fmt_age(secs):
+    secs = max(0, int(secs))
+    if secs < 60:
+        return "%ds" % secs
+    if secs < 3600:
+        return "%dm" % (secs // 60)
+    if secs < 86400:
+        return "%dh" % (secs // 3600)
+    return "%dd" % (secs // 86400)
+
+
+# ---------------------------------------------------------- pango output ----
+NERD_ARROW = {"up": "", "down": "", "flat": "", None: ""}
+
+
+def esc(s):
+    return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def fg(color, text):
+    return text if not color else "<span foreground='%s'>%s</span>" % (color, text)
+
+
+def bold_fg(color, text):
+    if not color:
+        return "<span font_weight='bold'>%s</span>" % text
+    return "<span font_weight='bold' foreground='%s'>%s</span>" % (color, text)
+
+
+def visible_len(s):
+    """Rendered width: Pango tags skipped, entities counted as one cell."""
+    n, in_tag, in_entity = 0, False, False
+    for ch in s:
+        if in_tag:
+            in_tag = ch != ">"
+            continue
+        if in_entity:
+            if ch == ";":
+                in_entity, n = False, n + 1
+            continue
+        if ch == "<":
+            in_tag = True
+        elif ch == "&":
+            in_entity = True
+        else:
+            n += 1
+    return n
+
+
+def pad_right(s, w):
+    return s + " " * max(0, w - visible_len(s))
+
+
+def pad_left(s, w):
+    return " " * max(0, w - visible_len(s)) + s
+
+
+def dir_color(direction, c):
+    # The core's own direction semantics, straight out of the published palette.
+    return c["up"] if direction == "up" else c["down"] if direction == "down" else c["flat"]
+
+
+def render_row(r, w, c):
+    label = pad_right(bold_fg(c["text"], esc(r["label"])), w["label"])
+    price = pad_left(fg(dir_color(r["direction"], c), fmt_value(r)), w["price"])
+    chg_plain = fmt_change(r["change_pct"], r["direction"])
+    chg = pad_left(fg(dir_color(r["direction"], c), chg_plain) if chg_plain else "", w["change"])
+    note = ""
+    if r.get("day_low") is not None and r.get("day_high") is not None:
+        lo, hi = (fmt_price(r["day_low"]), fmt_price(r["day_high"]))
+        note += fg(c["dim"], "  %s-%s" % (lo, hi))
+    if r["state"] == "stale":
+        note += fg(c["dim"], "  (stale %s)" % fmt_age(STALE_AGE_S))
+    elif r["state"] in ("missing", "error"):
+        note += fg(c["dim"], "  (n/d)")
+    return "    %s  %s  %s%s" % (label, price, chg, note)
+
+
+def render_header(g, continued, c):
+    out = "  " + bold_fg(c["text"], g["label"])
+    if g["sources"]:
+        out += fg(c["dim"], " (%s)" % "·".join(g["sources"]))
+    if continued:
+        out += fg(c["dim"], " (cont.)")
+    if g["closed"]:
+        out += fg(c["dim"], "  closed")
+    return out
+
+
+def build_tooltip(c):
+    w = {
+        "label": max(visible_len(esc(r["label"])) for r in ALL_ROWS),
+        "price": max(visible_len(fmt_value(r)) for r in ALL_ROWS),
+        "change": max(visible_len(fmt_change(r["change_pct"], r["direction"])) for r in ALL_ROWS),
+    }
+    cols = []
+    for col in COLUMNS:
+        lines = []
+        for s in col:
+            g = GROUPS[s["group"]]
+            lines.append(render_header(g, s["continued"], c))
+            for r in g["rows"][s["start"]:s["start"] + s["len"]]:
+                lines.append(render_row(r, w, c))
+        cols.append(lines)
+
+    # Banding is active (3 columns, cap 2), so every column pads to one width.
+    uniform = max(visible_len(l) for col in cols for l in col)
+    bands = []
+    for band in [cols[i:i + MAX_COLUMNS] for i in range(0, len(cols), MAX_COLUMNS)]:
+        height = max(len(col) for col in band)
+        bands.append(["   ".join(pad_right(col[r] if r < len(col) else "", uniform)
+                                 for col in band) for r in range(height)])
+
+    title = bold_fg(c["accent"], "tickerbar")
+    # The freshness footer must match the real renderer exactly, clock glyph
+    # included — this fixture is what the README screenshots show.
+    footer = fg(c["dim"], "  󰅐  Updated %s" % time.strftime("%H:%M"))
+    width = max([visible_len(l) for b in bands for l in b] + [visible_len(footer), 20])
+    width = max(width, visible_len(title))
+    rule = fg(c["dim"], "─" * width)
+
+    if not FRAME:
+        out = [title, rule]
+        for i, band in enumerate(bands):
+            if i:
+                out.append(rule)
+            out.extend(band)
+        out += [rule, footer]
+        return "\n".join(out)
+
+    # Framed: the box the real renderer draws under `frame = true`, pinned to a
+    # Mono Nerd Font so every column lands on the same advance.
+    def pad(line):
+        return line + " " * max(0, width - visible_len(line))
+    b = lambda t: fg(c["border"] if "border" in c else c["dim"], t)
+    left = max(0, (width - visible_len(title)) // 2)
+    out = [b("╭" + "─" * (width + 2) + "╮"),
+           b("│ ") + pad(" " * left + title) + b(" │"),
+           b("│ ") + pad(fg(c["dim"], "─" * width)) + b(" │")]
+    for i, band in enumerate(bands):
+        if i:
+            out.append(b("│ ") + pad(fg(c["dim"], "─" * width)) + b(" │"))
+        for line in band:
+            out.append(b("│ ") + pad(line) + b(" │"))
+    out.append(b("│ ") + pad(fg(c["dim"], "─" * width)) + b(" │"))
+    out.append(b("│ ") + pad(footer) + b(" │"))
+    out.append(b("╰" + "─" * (width + 2) + "╯"))
+    body = "\n".join(out)
+    return "<span font_family='JetBrainsMono Nerd Font Mono'>%s</span>" % body
+
+
+def build_bar_text(c):
+    parts = []
+    for r in BAR_ROWS:
+        dc = dir_color(r["direction"], c)
+        parts.append("%s %s %s%s" % (
+            esc(r["label"]),
+            fg(dc, fmt_value(r)),
+            fg(dc, NERD_ARROW[r["direction"]]),
+            fg(dc, fmt_change(r["change_pct"], r["direction"])),
+        ))
+    bar = "   ".join(parts)
+    avg_dir = "up" if AVG > 0 else "down" if AVG < 0 else "flat"
+    dc = dir_color(avg_dir, c)
+    summary = "Σ %s%s" % (fg(dc, NERD_ARROW[avg_dir]), fg(dc, fmt_change(AVG, avg_dir)))
+    return "%s   %s" % (summary, bar)
+
+
+# ------------------------------------------------------------------ emit ----
+def content_width(items):
+    return max([visible_len(i) for i in items] + [20])
+
+
+def emit_bad_arguments():
+    """The real CLI's argument-error contract: exit 0 with a fallback document in the
+    requested format, built from the BUILT-IN palette (the theme is not loaded on that
+    path). Reproduced so a screenshot of a mistyped flag looks like the real thing."""
+    msg = "bad arguments"
+    if WANT_JSON:
+        return json.dumps({
+            "schema_version": 1, "state": "error", "error": {"message": msg},
+            "fetched_at": NOW.isoformat().replace("+00:00", "Z"),
+            "bar": [], "avg_change_pct": None, "summary_configured": False,
+            "layout": {"rows_per_column": 0, "max_columns": 0, "bands": []},
+            "groups": [], "palette": dict(ONE_DARK),
+        })
+    c = ONE_DARK if TIP_COLORED else MONO
+    header = bold_fg(c["error"], "  " + esc("tickerbar error"))
+    body = fg(c["dim"], "  " + esc(msg))
+    width = content_width([header, body])
+    return json.dumps({
+        "text": "?", "tooltip": "\n".join([header, fg(c["dim"], "─" * width), body]),
+        "class": ["error"], "alt": "error",
+    })
+
+
+if BAD_ARGS:
+    sys.stdout.write(emit_bad_arguments() + "\n")
+elif WANT_JSON:
+    doc = {
+        "schema_version": 1,
+        # One row has no price, so the run is "partial" — the lifecycle footer shows it.
+        "state": "partial",
+        "error": None,
+        "fetched_at": NOW.isoformat().replace("+00:00", "Z"),
+        "bar": BAR_ROWS,
+        "avg_change_pct": AVG,
+        "summary_configured": True,
+        "layout": {"rows_per_column": ROWS_PER_COLUMN, "max_columns": MAX_COLUMNS,
+                   "bands": BANDS},
+        "groups": GROUPS,
+        # Always the real palette: --no-color never reaches the structured document.
+        "palette": THEME,
+    }
+    sys.stdout.write(json.dumps(doc) + "\n")
+else:
+    sys.stdout.write(json.dumps({
+        "text": build_bar_text(THEME if BAR_COLORED else MONO),
+        "tooltip": build_tooltip(THEME if TIP_COLORED else MONO),
+        "class": ["partial", "stale", "mixed"],
+        "alt": "ticker",
+    }) + "\n")
+PY

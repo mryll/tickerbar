@@ -3,52 +3,40 @@
 [![AUR version](https://img.shields.io/aur/version/tickerbar)](https://aur.archlinux.org/packages/tickerbar)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-A multi-market price ticker for [Waybar](https://github.com/Alexays/Waybar): crypto, stocks & indices, commodities, forex, Treasury yields, and fiat currencies in one module — with **no API key**.
+A multi-market price ticker for [Waybar](https://github.com/Alexays/Waybar) and the [Omarchy](https://omarchy.org) shell. It shows crypto, stocks, indices, commodities, forex and Treasury yields in one widget. Every default provider needs **no API key**. Finnhub is the one exception, and it is optional.
 
 <p align="center">
-  <img src="screenshots/bar.png" alt="tickerbar in Waybar" width="800">
+  <img src="screenshots/omarchy-panel.png" alt="tickerbar panel in the Omarchy shell" width="820">
 </p>
 
 <p align="center">
-  <em>A compact line in your bar — hover for the full, color-coded table:</em><br><br>
-  <img src="screenshots/tooltip-simple.png" alt="tickerbar tooltip" width="800">
+  <em>Click the bar strip to open the full table. Move the pointer onto the Waybar module to get the same table as a tooltip:</em><br><br>
+  <img src="screenshots/waybar-tooltip.png" alt="tickerbar tooltip in Waybar" width="820">
 </p>
 
 ## Why tickerbar?
 
-- **Many markets, one widget, no API key.** Crypto (CoinGecko), US stocks & indices, commodities and Treasury yields (CNBC), forex (ECB / Frankfurter) and fiat — each from the best free, key-less source. Track BTC, NVDA, the S&P 500, gold, the US 10Y and EUR/USD side by side.
-- **Never breaks your bar.** Any failure — a dead API, a rate limit, a malformed response, even a corrupt config — still prints valid Waybar JSON and exits 0. A down provider never blanks the others.
-- **A tooltip worth opening.** A column-aligned table grouped by asset class, color-coded up/down, that wraps long watchlists into stacked columns (great for narrow/vertical monitors) and picks up your [Omarchy](https://omarchy.org) theme colors.
-- **Market-hours aware.** Closed markets aren't polled and show `⏸ closed` — only crypto runs 24/7.
-- **Argentine market, too.** As a bonus, full BYMA support via data912: the blue/MEP dollar plus local stocks, bonds, CEDEARs and ONs in pesos.
+- **Many markets, one widget, no API key.** Crypto comes from CoinGecko. Stocks, indices, commodities and Treasury yields come from CNBC. Forex comes from Frankfurter. Watch BTC, NVDA, the S&P 500, gold, the US 10Y and EUR/USD together.
+- **It never breaks your bar.** A dead API, a rate limit, a bad response or a broken config file all give valid JSON and exit code 0. One broken provider does not blank the others.
+- **A table worth opening.** Rows align in columns and group by asset class. Long watchlists wrap into side-by-side columns and into stacked bands below. The core computes that layout one time, so both frontends draw the same shape.
+- **Your theme, everywhere.** Colors come from the active Omarchy theme, or from a pywal cache, or from a built-in palette. The core publishes the palette that it resolved, so the bar, the tooltip and the panel paint the same number the same color.
+- **It knows market hours.** tickerbar does not poll a closed market. Closed groups show a pause mark. Only crypto runs every day.
+- **The Argentine market too.** data912 gives BYMA prices with no key: the blue dollar and the MEP dollar, plus local stocks, bonds, CEDEARs and corporate bonds in pesos.
 
-The tooltip groups your watchlist by asset class and wraps into columns as it grows:
+## Screenshots
 
-![tickerbar tooltip with a large watchlist](screenshots/tooltip-full.png)
+| Waybar bar and tooltip | Omarchy bar strip |
+|:---:|:---:|
+| ![Waybar bar and tooltip](screenshots/waybar-tooltip-simple.png) | ![Omarchy bar strip](screenshots/omarchy-bar.png) |
 
-## Features
+The framed tooltip draws a box and pins a Mono Nerd Font, so columns stay aligned under any bar font:
 
-- Crypto prices with 24h change (CoinGecko) — pick the quote currency per asset (`usd`, `ars`, …)
-- Argentine dollar: oficial, blue, MEP/bolsa, CCL, etc. (DolarAPI), buy/sell/mid side
-- Forex pairs (Frankfurter v2)
-- Stocks/indices with no key via CNBC (`AAPL`, `.SPX`); optional Finnhub with a free key
-- Commodities, indices & Treasury yields with no key via friendly aliases (`gold`, `wti`, `vix`, `us10y`) — yields render as a percent
-- Argentine market (BYMA) with no key via data912 — acciones, bonos, CEDEARs, ONs (in ARS)
-- Multi-column tooltip (`tooltip_rows_per_column`) so large watchlists wrap instead of growing tall, with a column cap (`tooltip_max_columns`) that stacks extra columns into bands below — fits narrow/vertical monitors
-- Optional intraday low–high range per row (`tooltip_range`) for CNBC-backed assets (stocks, indices, commodities, rates)
-- Market-hours aware: closed markets aren't polled (built-in calendars) and show `⏸ closed`
-- Compact bar with a configurable format, or opt-in rotating "ticker-tape" mode
-- Curated bar subset (`bar`) — choose which assets, and in what order, appear on the bar by label, independently of the full tooltip
-- Optional watchlist summary (`summary_format`) — an equal-weighted average of the change %, with placement controlled by a `bar_layout` template (`{bar}`/`{summary}`)
-- Per-provider caching with TTLs and rate-limit (HTTP 429) backoff
-- CSS classes for bar styling: lifecycle (`ok`/`partial`/`stale`/`error`) + direction (`up`/`down`/`flat`/`mixed`)
-- Nerd Font, emoji, or ASCII icon sets
-- Written in Rust — single binary, no runtime dependencies
+![Framed tooltip with three columns](screenshots/waybar-tooltip-full.png)
 
 ## Requirements
 
-- [Waybar](https://github.com/Alexays/Waybar)
-- A [Nerd Font](https://www.nerdfonts.com/) for icons (or set `icons = "ascii"`; a Nerd Font Mono is required only for the framed tooltip, `frame = true`)
+- [Waybar](https://github.com/Alexays/Waybar), or the [Omarchy](https://omarchy.org) shell for the native widget
+- A [Nerd Font](https://www.nerdfonts.com/) for the glyphs. Set `icons = "ascii"` if you do not have one. A Mono Nerd Font is necessary only for the framed tooltip (`frame = true`).
 
 ## Installation
 
@@ -66,16 +54,38 @@ cd tickerbar
 make install PREFIX=~/.local
 ```
 
-Or system-wide: `sudo make install`.
+To install for all users, run `sudo make install`.
 
-## Configuration
+<p align="center">
+  <img src="screenshots/waybar-bar.png" alt="tickerbar in Waybar" width="800">
+</p>
 
-tickerbar reads `~/.config/tickerbar/config.toml`. Copy the example to get started:
+## Quick start
 
 ```bash
 mkdir -p ~/.config/tickerbar
+tickerbar --preset starter > ~/.config/tickerbar/config.toml
+tickerbar
+```
+
+The last command prints one line of Waybar JSON. The `starter` preset is a balanced set across markets: crypto, one megacap stock, one index, gold, one Treasury yield and one forex pair.
+
+To see the other presets:
+
+```bash
+tickerbar --list-presets       # starter, crypto-top, megacap, indices-global, fx-majors, commodities, rates
+tickerbar --preset crypto-top >> ~/.config/tickerbar/config.toml
+```
+
+## Configuration
+
+tickerbar reads `~/.config/tickerbar/config.toml`. The repository has a full example:
+
+```bash
 cp config.example.toml ~/.config/tickerbar/config.toml
 ```
+
+### Display
 
 ```toml
 [display]
@@ -83,38 +93,76 @@ mode = "fixed"          # "fixed" | "rotate"
 rotate_interval = 5     # seconds per asset (rotate mode only)
 max_on_bar = 3          # assets shown on the bar (fixed mode)
 icons = "nerd"          # "nerd" | "emoji" | "ascii"
-# Bar placeholders: {label} {price} {change_pct} {arrow} {glyph}
-# Format strings are Pango markup: literal &, < and > must be escaped (&amp; &lt; &gt;).
 bar_format = "{glyph} {label} {price} {arrow}{change_pct}"
-# Optional summary prepended to the bar (empty = off). Separate template with its own
-# placeholders: {avg_change} {avg_arrow}. It is the equal-weighted mean of each asset's
-# daily change %; assets with no daily change (some FX/dólar/Stooq quotes) are excluded.
-# Averaging heterogeneous markets is a "watchlist mood", not a real portfolio return.
 summary_format = ""     # e.g. "Σ {avg_arrow}{avg_change}"
-# Curated subset shown on the bar, by label, in this order. Empty = all assets (config order).
-# The tooltip is unaffected (always all assets, config order). Unknown labels are ignored.
-bar = []                # e.g. ["BTC", "Blue", "S&P500"]
-# Layout combining the assets block {bar} and the summary block {summary}. Default puts the
-# summary first; e.g. "{bar}   {summary}" puts it at the end. When one block is empty its
-# surrounding literals are dropped, so an empty summary never leaves a dangling separator.
+bar = []                # e.g. ["BTC", "ETH", "Gold"]
 bar_layout = "{summary}   {bar}"
-# Tooltip frame: draw the bordered box and pin a Mono Nerd Font so columns stay aligned
-# under any bar font. Off (default) = plain, borderless, renders in your font.
+tooltip_rows_per_column = 0
+tooltip_max_columns = 0
+tooltip_range = false
 frame = false
-# Font pinned when frame = true — must be a complete Mono Nerd Font.
 frame_font = "JetBrainsMono Nerd Font Mono"
+```
+
+| Key | Default | What it does |
+|---|---|---|
+| `mode` | `fixed` | `fixed` shows the first `max_on_bar` assets. `rotate` shows one asset at a time. |
+| `rotate_interval` | `5` | Seconds per asset in `rotate` mode. |
+| `max_on_bar` | `3` | How many assets the bar shows in `fixed` mode. |
+| `icons` | `nerd` | Icon set for the bar: `nerd`, `emoji` or `ascii`. |
+| `bar_format` | see above | Bar template. Tokens: `{label}` `{price}` `{change_pct}` `{arrow}` `{glyph}`. |
+| `summary_format` | `""` | Optional average block. Tokens: `{avg_change}` `{avg_arrow}`. An empty value turns it off. |
+| `bar` | `[]` | Labels to show on the bar, in this order. An empty list means all assets. The table does not change. |
+| `bar_layout` | `{summary}   {bar}` | Where the two blocks go. An empty block drops its own separators. |
+| `tooltip_rows_per_column` | `0` | Start a new column after N lines. `0` means one column. |
+| `tooltip_max_columns` | `0` | The most columns side by side. Extra columns move to a band below. `0` means no limit. |
+| `tooltip_range` | `false` | Add the low-high range of the day to each row. |
+| `frame` | `false` | Draw the box and pin `frame_font`. |
+| `frame_font` | `JetBrainsMono Nerd Font Mono` | The font to pin. It must be a complete Mono Nerd Font. |
+
+> [!NOTE]
+> Format strings are Pango markup. Write a literal `&`, `<` or `>` as `&amp;`, `&lt;` or `&gt;`.
+>
+> `summary_format` gives the equal-weight mean of the daily change of each asset. Assets with no daily change stay out of it. A mean across different markets is a mood, not a portfolio return.
+
+### Assets
+
+Each asset is one `[[asset]]` block with three parts:
+
+```toml
+[[asset]]
+label = "BTC"           # the text on the bar and in the table — your choice
+provider = "coingecko"  # where the price comes from
+id = "bitcoin"          # the keys that provider needs
+quote = "usd"
+```
+
+Find your asset class in the first column. That row gives you the `provider` and the keys it needs. Every provider works with **no API key**, except `finnhub`.
+
+| To track | `provider` | Other keys | Accepted values |
+|---|---|---|---|
+| A stock | `cnbc` | `symbol` | A ticker: `AAPL`, `MSFT`. Outside the United States, see below. |
+| A crypto coin | `coingecko` | `id`, `quote` | A CoinGecko coin id (`bitcoin`) and any vs_currency (`usd`, `eur`, `ars`). |
+| A stock index | `index` | `symbol` | `sp500`, `nasdaq`, `dow`, `vix`, `dax`, `ftse`, `nikkei`, `hangseng`, or a raw symbol (`.SPX`). |
+| A commodity | `commodity` | `symbol` | `gold`, `silver`, `wti`, `brent`, `natgas`, `copper`, `platinum`, `palladium`, or a raw symbol (`@GC.1`). |
+| A treasury yield | `rate` | `symbol` | `us10y`, `us2y`, `us5y`, `us30y`. Shown as a percent. |
+| A currency pair | `frankfurter` | `base`, `quote` | Two currency codes: `base = "eur"`, `quote = "usd"`. Daily reference rates. |
+| The Argentine dollar | `dolarapi` | `casa`, `side` | `casa = "blue"`, `casa = "mep"`, and the other houses. Prices in ARS. |
+| The Argentine market (BYMA) | `data912` | `panel`, `symbol` | `panel` is `acciones`, `bonos`, `cedears` or `corp`. Prices in ARS, about 2 hours late. |
+| A stock, from a documented source | `finnhub` | `symbol` | A ticker. Needs a free key (see below). |
+
+Three examples:
+
+```toml
+[[asset]]
+label = "AAPL"
+provider = "cnbc"
+symbol = "AAPL"
 
 [[asset]]
-label = "BTC"
-provider = "coingecko"
-id = "bitcoin"          # CoinGecko coin id
-quote = "usd"           # any CoinGecko vs_currency (usd, ars, eur, …)
-
-[[asset]]
-label = "Blue"
-provider = "dolarapi"
-casa = "blue"           # oficial | blue | bolsa | contadoconliqui | tarjeta | mayorista | cripto
-side = "sell"           # buy | sell | mid
+label = "S&P 500"
+provider = "index"
+symbol = "sp500"
 
 [[asset]]
 label = "EUR/USD"
@@ -123,50 +171,49 @@ base = "eur"
 quote = "usd"
 ```
 
-### Providers
+#### Stocks outside the United States
 
-| Provider | Asset class | API key | Notes |
-|---|---|---|---|
-| `coingecko` | Crypto | No | `id` + `quote` (vs_currency). 24h change included. |
-| `dolarapi` | Argentine peso | No | `casa` + `side`. Uses the provider's own update timestamp. |
-| `frankfurter` | Forex | No | `base` + `quote`. Reference rates (daily). |
-| `cnbc` | Stocks/indices | No | `symbol` — plain ticker (`AAPL`) or index with a leading dot (`.SPX`, `.IXIC`, `.DJI`). |
-| `commodity` | Commodities | No | `symbol` — friendly alias (`gold`, `silver`, `wti`, `brent`, `natgas`, `copper`, `platinum`, `palladium`) or any raw CNBC symbol (`@GC.1`). Via CNBC. |
-| `index` | Indices | No | `symbol` — friendly alias (`vix`, `sp500`, `nasdaq`, `dow`, `dax`, `ftse`, `nikkei`, `hangseng`) or raw (`.VIX`). Via CNBC. |
-| `rate` | Treasury yields | No | `symbol` — `us10y`, `us2y`, `us30y`, `us5y`. Rendered as a percent (e.g. `4.53%`). Via CNBC. |
-| `data912` | Argentine market (BYMA) | No | `panel` (`acciones`/`bonos`/`cedears`/`corp`) + `symbol` (e.g. `ALUA`, `GD35`, `MELI`). ARS, ~2h delay. |
-| `finnhub` | Stocks/indices | Yes (free) | `symbol`. Token via `FINNHUB_TOKEN` env var. |
-| `stooq` | Stocks/indices | No | `symbol` (e.g. `aapl.us`). Best-effort; often anti-bot-walled → `n/d`. |
+`cnbc` takes a plain ticker for a listing in the United States. For a different exchange, add the country code to the ticker. The currency comes from the feed, so each stock keeps the currency of its own exchange.
+
+| Exchange | `symbol` | Currency |
+|---|---|---|
+| United States | `AAPL` | USD |
+| London | `VOD-GB` | GBP |
+| Amsterdam | `ASML-NL` | EUR |
+| Paris | `AIR-FR` | EUR |
+| Toronto | `SHOP-CA` | CAD |
+
+Not every market answers. Tokyo (`-JP`) and Buenos Aires (`-AR`) give no data. The format is not documented by the source, so test a symbol before you trust it:
+
+```bash
+tickerbar --output json | jq '.groups[].rows[] | {label, price, state}'
+```
+
+A symbol that works shows `"state": "fresh"` and a price. A symbol that does not shows `"state": "missing"`.
+
+> [!IMPORTANT]
+> Market hours apply **one calendar per provider**, not per asset. All `cnbc` stocks use the hours of the United States. If you track a stock from a different country, turn the gate off for `cnbc` (see [Market hours](#market-hours)). If you do not, the group is marked closed at the wrong times.
 
 > [!NOTE]
-> **Stocks/indices work with no key via `cnbc`** (CNBC's public quote endpoint, batched). It's an unofficial endpoint, so treat it as delayed/best-effort — tickerbar is **not** a live trading feed. If you want a documented/keyed source instead, use `finnhub` with a free key:
+> Stocks and indices need **no key** through `cnbc`. That endpoint is public but not documented, so treat the prices as late and best effort. tickerbar is **not** a live trading feed.
+>
+> For a documented source with a free key, use `finnhub`:
 >
 > ```bash
 > export FINNHUB_TOKEN=your_free_token   # from https://finnhub.io; sent as a header, never in a URL
 > ```
 
-> [!NOTE]
-> `BTC/ARS` via CoinGecko uses CoinGecko's market ARS (≈ official), **not** the blue dollar. Pricing crypto at the blue rate (cross-conversion) is intentionally not done in this version.
-
-### Presets
-
-Don't want to hand-pick symbols? Print a curated, ready-to-paste watchlist and append it to your config:
-
-```bash
-tickerbar --list-presets       # starter, crypto-top, megacap, indices-global, fx-majors, commodities, rates
-tickerbar --preset crypto-top >> ~/.config/tickerbar/config.toml
-```
-
-`starter` is a balanced cross-market set (crypto, a megacap, an index, gold, a Treasury yield, and a forex pair) — a good first config.
-
 ### Market hours
 
-By default tickerbar does **not** poll a market while it's closed — it serves the last close
-from cache and marks the panel `⏸ closed` in the tooltip. Built-in calendars (timezone- and
-DST-aware via `chrono-tz`): crypto 24/7; BYMA (data912) Mon–Fri 10:30–17:00 ART; US stocks
-(cnbc/finnhub/stooq) Mon–Fri 09:30–16:00 ET; ECB forex (frankfurter) weekdays. Commodities,
-indices and rates (`commodity`/`index`/`rate`) are always polled in this version (commodities
-trade nearly 24/5) — they have no `⏸ closed` badge.
+tickerbar does not poll a market while it is closed. It serves the last close from the cache and marks the group as closed. The calendars know time zones and daylight saving time through `chrono-tz`.
+
+| Market | Hours |
+|---|---|
+| Crypto | Every day, all day |
+| BYMA (`data912`) | Monday to Friday, 10:30 to 17:00 ART |
+| US stocks (`cnbc`, `finnhub`) | Monday to Friday, 09:30 to 16:00 ET |
+| Forex (`frankfurter`) | Monday to Friday |
+| Commodities, indices, rates | Always polled, no closed mark |
 
 ```toml
 [market_hours]
@@ -177,17 +224,7 @@ enabled = false                # disable gating for one provider (e.g. a non-US 
 ```
 
 > [!NOTE]
-> Stock providers (`cnbc`/`finnhub`/`stooq`) assume **US** hours; disable their gating if you
-> track a non-US instrument through them. Exchange **holidays are not** accounted for — only
-> weekly session hours.
-
-## Theming (Omarchy)
-
-Tooltip and bar colors are read from the active [Omarchy](https://omarchy.org) theme at `~/.config/omarchy/current/theme/colors.toml` on every run — the accent, the up/down green/red, and the foreground/background all follow your theme (light themes included). On non-Omarchy systems a built-in dark palette is used as a fallback.
-
-| Gruvbox | Catppuccin Latte | Everforest |
-|:---:|:---:|:---:|
-| ![Gruvbox](screenshots/theme-gruvbox.png) | ![Catppuccin Latte](screenshots/theme-catppuccin-latte.png) | ![Everforest](screenshots/theme-everforest.png) |
+> The stock providers assume **US** hours. Turn their gate off if you track a stock from another country through them. The calendars do not know the holidays of an exchange.
 
 ## Waybar integration
 
@@ -203,13 +240,13 @@ Add a custom module to `~/.config/waybar/config`:
 }
 ```
 
-Then place `"custom/tickerbar"` in one of your `modules-*` arrays. Force a refresh anytime with:
+Then put `"custom/tickerbar"` in one of your `modules-*` arrays. To get new data at any time:
 
 ```bash
 pkill -RTMIN+8 waybar
 ```
 
-Style it in `~/.config/waybar/style.css` using the emitted classes:
+tickerbar sets CSS classes for the lifecycle (`ok`, `partial`, `stale`, `error`) and for the direction (`up`, `down`, `flat`, `mixed`). Use them in `~/.config/waybar/style.css`:
 
 ```css
 #custom-tickerbar.up    { color: #98c379; }
@@ -218,6 +255,153 @@ Style it in `~/.config/waybar/style.css` using the emitted classes:
 #custom-tickerbar.error { color: #e06c75; }
 ```
 
+### Monochrome mode
+
+For a quiet bar, turn the colors off everywhere, or on one surface only:
+
+| Command | Bar text | Tooltip |
+|---|---|---|
+| *(no flag)* | color | color |
+| `--no-color` / `--no-color=all` | plain | plain |
+| `--no-color=bar` | plain | color |
+| `--no-color=tooltip` | color | plain |
+
+Plain means no Pango color markup on that surface. Everything with a structure stays. That is the glyphs, the direction arrow, the box, the bold labels, the dim marks on closed and stale rows, and the column alignment. Column widths do not move, because the core measures them without the markup tags.
+
+tickerbar also obeys the `NO_COLOR` environment variable, as [no-color.org](https://no-color.org) describes. Any value that is not empty acts like `--no-color=all`. An explicit flag wins over the variable, so `NO_COLOR=1 tickerbar --no-color=bar` keeps the color in the tooltip. The flag is the more exact instruction.
+
+The CSS classes stay the same in every mode. Monochrome plus your own classes is therefore the **style it yourself** path: remove the built-in colors and drive the module from your stylesheet.
+
+<p align="center">
+  <img src="screenshots/waybar-tooltip-mono.png" alt="Monochrome tooltip" width="820">
+</p>
+
+## Theming
+
+Colors come from the first source in this list that exists:
+
+| # | Source | Path |
+|---|---|---|
+| 1 | Omarchy theme | `$XDG_STATE_HOME/omarchy/current/theme/colors.toml` (default `~/.local/state/…`) |
+| 2 | Omarchy theme, old location | `~/.config/omarchy/current/theme/colors.toml` |
+| 3 | pywal cache | `$XDG_CACHE_HOME/wal/colors.json` (default `~/.cache/…`) |
+| 4 | Built-in One Dark palette | — |
+
+An Omarchy theme gives the keys `accent`, `foreground`, `background`, `red`, `green`, `yellow` and `orange`. Older themes that give only the terminal palette (`color1`, `color2`, `color3`) still work.
+
+One path covers three tools. The first pywal is archived, but [pywal16](https://github.com/eylles/pywal16) writes the same file, and [wallust](https://codeberg.org/explosion-mental/wallust) has a target that is compatible with pywal. pywal has no orange slot, so tickerbar makes orange from the middle point between yellow and red.
+
+If a source has no value for a key, that key keeps its built-in default. Every value must be correct hex. A partial theme or a bad value can therefore not turn theming off.
+
+| Flexoki Light | Rosé Pine | Hackerman |
+|:---:|:---:|:---:|
+| ![Flexoki Light](screenshots/omarchy-theme-flexoki-light.png) | ![Rosé Pine](screenshots/omarchy-theme-rose-pine.png) | ![Hackerman](screenshots/omarchy-theme-hackerman.png) |
+
+| Ristretto | Nord | Kanagawa |
+|:---:|:---:|:---:|
+| ![Ristretto](screenshots/omarchy-theme-ristretto.png) | ![Nord](screenshots/omarchy-theme-nord.png) | ![Kanagawa](screenshots/omarchy-theme-kanagawa.png) |
+
+The Waybar tooltip follows the same themes:
+
+| Flexoki Light | Rosé Pine | Hackerman |
+|:---:|:---:|:---:|
+| ![Flexoki Light](screenshots/waybar-theme-flexoki-light.png) | ![Rosé Pine](screenshots/waybar-theme-rose-pine.png) | ![Hackerman](screenshots/waybar-theme-hackerman.png) |
+
+| Ristretto | Nord | Kanagawa |
+|:---:|:---:|:---:|
+| ![Ristretto](screenshots/waybar-theme-ristretto.png) | ![Nord](screenshots/waybar-theme-nord.png) | ![Kanagawa](screenshots/waybar-theme-kanagawa.png) |
+
+> [!NOTE]
+> **If you upgrade, your colors will change.** Older versions looked only in `~/.config/…` and needed a `color1` key. Current Omarchy keeps the theme in the state directory and uses named keys. The older versions therefore found nothing and painted the built-in palette without a message. Colors now follow your real theme. This is the correction, not a fault.
+>
+> **The Omarchy bar strip has more color than before.** It used a weak tint of its own. It now paints the color that the core publishes, which is the color the Waybar bar already used.
+
+## Omarchy shell plugin
+
+tickerbar also has a native widget for the [Omarchy shell](https://github.com/basecamp/omarchy), in the `omarchy/` directory.
+
+The bar shows your list from `display.bar` as a compact strip with tinted prices, each one led by its asset-class mark. A click opens a themed panel. The panel starts with a header that gives the asset count and the number of markets that are open. Below the header, the full watchlist is a real table, grouped by asset class. The header also carries the watchlist average, which the panel shows by default. Use `summaryMode` to control it. A value of `hide` removes the average from the bar and from the panel. Closed markets are dim, and a footer gives the time of the last update. A middle click gets new data. The footer of the panel ends with a refresh control (󰑐), next to the time of the last update. The control stays disabled while a fetch runs.
+
+The panel never scrolls. Long watchlists wrap into side-by-side columns and into bands below. The core computes the packing one time, in the same code that lays out the Waybar tooltip. It sends the plan inside the structured JSON (`layout.bands`). The panel only draws it.
+
+Both frontends obey `tooltip_rows_per_column` and `tooltip_max_columns`. There is one honest difference at `tooltip_rows_per_column = 0`. The Waybar tooltip draws one column. The panel measures how many lines and columns its screen can hold, then sends the measurements as `--rows-per-column` and `--max-columns`. The core applies them only where the config left the value at 0, and it uses `--max-columns` only to make the limit smaller. A value above 0 in the config pins both frontends to the same fixed layout.
+
+### Install the plugin
+
+`make install-omarchy` makes a symbolic link from the repository root to `~/.config/omarchy/plugins/mryll.tickerbar`. The manifest is in that root and points to `omarchy/`.
+
+```bash
+make install          # the plugin runs the tickerbar binary from PATH
+make install-omarchy
+```
+
+Then add the widget to a bar section in `~/.config/omarchy/shell.json`:
+
+```json
+{ "id": "mryll.tickerbar" }
+```
+
+To remove the plugin, run `make uninstall-omarchy`. This removes only the symbolic link.
+
+> [!IMPORTANT]
+> The shell does not detect file changes through a symbolic link. After you edit a plugin file, run `omarchy restart shell`. A `rescanPlugins` command finds new plugins, but it does not compile the QML again.
+
+### Plugin settings
+
+Change these settings in the settings window of the shell, or write them in the `shell.json` entry:
+
+| Setting | Type | Default | Description |
+|---|---|---|---|
+| `refreshIntervalSec` | integer | `60` | Seconds between updates (5 to 3600). |
+| `configPath` | string | `""` | Another config file. An empty value means `~/.config/tickerbar/config.toml`. |
+| `summaryMode` | enum | `follow` | The watchlist average on the bar. `follow` obeys `summary_format`. `show` and `hide` force it. |
+| `colorMode` | enum | `full` | Direction tint: `full`, `none`, `bar-only` (color on the strip only), `panel-only` (the opposite). This is equal to `--no-color` in the CLI. |
+
+<p align="center">
+  <img src="screenshots/omarchy-panel-mono.png" alt="Omarchy panel with colorMode set to none" width="820">
+</p>
+
+## Structured JSON output
+
+`tickerbar --output json` prints one JSON object with the raw data and no markup. Numbers stay numbers. Any frontend can read it, and the Omarchy widget uses it.
+
+```bash
+tickerbar --output json | jq .
+```
+
+The document has `schema_version: 1` and these top-level keys:
+
+| Key | What it holds |
+|---|---|
+| `state` | `ok`, `partial`, `stale` or `error`. |
+| `error` | `null`, or an object with a `message`. |
+| `fetched_at` | The time of the run, in ISO-8601. |
+| `bar` | The rows for the bar, already selected and in order. |
+| `avg_change_pct` | The equal-weight mean change, or `null`. |
+| `summary_configured` | Whether the config file sets a `summary_format`. |
+| `layout` | The packing plan: `rows_per_column`, `max_columns` and `bands`. |
+| `groups` | The rows by asset class, each with a `label`, a `glyph` and its sources. |
+| `palette` | The colors that the core resolved. |
+
+The `palette` holds `up`, `down`, `flat`, `text`, `dim`, `accent` and `error`. The first three are the direction colors that the core paints the Waybar tooltip with. A frontend applies them and does not make a tint of its own. The bar, the tooltip and the panel therefore give the same number the same color. One change to the theme chain moves all of them together.
+
+> [!NOTE]
+> `--no-color` never touches this document. It is a choice about the Pango surfaces only, so `palette` always holds the real colors. Like the Waybar mode, this mode always exits with code 0 and valid JSON.
+
+A row with no change for the day shows a percent with no sign, for example ` 0.00%`. A sign would say that the price moved. The width of the column stays the same, so the numbers keep their alignment. A very small move that rounds to `0.00` keeps its real sign, because the direction comes from the data and not from the printed text.
+
+## Troubleshooting
+
+| Symptom | Cause and correction |
+|---|---|
+| The module shows `?` and an error tooltip | The config file is bad, or a necessary key is absent. The tooltip gives the message. |
+| The Omarchy widget says the binary is absent | `tickerbar` is not on `PATH`. Run `make install PREFIX=~/.local`, or install the AUR package. |
+| A stock or an index shows `n/d` | The market is closed, or the provider does not know the symbol. Test it with `tickerbar --output json` (see [Stocks outside the United States](#stocks-outside-the-united-states)). |
+| The columns do not align | Your bar font is not monospace. Set `frame = true` to pin a Mono Nerd Font, or set `icons = "ascii"`. |
+| The colors do not follow my theme | Install the current version. Older versions read a path that current Omarchy no longer writes. |
+| An edit to the plugin does nothing | Run `omarchy restart shell`. |
+| The bar is too wide | Make `max_on_bar` smaller, or put only the labels that you want in `bar`. |
+
 ## Development
 
 ```bash
@@ -225,6 +409,12 @@ cargo test                          # unit + never-crash tests (offline)
 cargo test --features integration   # real-API smoke tests (network; set FINNHUB_TOKEN for the finnhub one)
 cargo clippy --all-targets -- -D warnings
 cargo fmt
+```
+
+The `screenshots/demo/demo-data` script gives a fixed demo watchlist in both output formats. Put its directory first on `PATH` to take screenshots with no live data:
+
+```bash
+PATH="$PWD/screenshots/demo:$PATH" waybar
 ```
 
 ## Related

@@ -61,7 +61,7 @@ fn spec(source: &AssetSource) -> Option<MarketSpec> {
             fetch_close: at(17, 30),
             closed_cache_mode: ClosedCacheMode::LatestSnapshot,
         }),
-        AssetSource::Stooq { .. } | AssetSource::Finnhub { .. } | AssetSource::Cnbc { .. } => {
+        AssetSource::Finnhub { .. } | AssetSource::Cnbc { .. } => {
             Some(MarketSpec {
                 tz: chrono_tz::America::New_York,
                 open: at(9, 30),

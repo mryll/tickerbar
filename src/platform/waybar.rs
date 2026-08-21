@@ -17,11 +17,22 @@ pub fn pango_escape(s: &str) -> String {
         .replace('>', "&gt;")
 }
 
+/// Tint `text`. An EMPTY color emits no markup at all — that is the single mechanism
+/// behind `--no-color`: monochrome surfaces are handed a `ThemeColors::monochrome()`
+/// whose fields are all empty, so no `foreground=` reaches the output while structure,
+/// glyphs and padding are untouched (`visible_len` ignores tags either way).
 pub fn fg(color: &str, text: &str) -> String {
+    if color.is_empty() {
+        return text.to_string();
+    }
     format!("<span foreground='{color}'>{text}</span>")
 }
 
+/// Weight is structure, not color: monochrome keeps the bold span and drops only the tint.
 pub fn bold_fg(color: &str, text: &str) -> String {
+    if color.is_empty() {
+        return format!("<span font_weight='bold'>{text}</span>");
+    }
     format!("<span font_weight='bold' foreground='{color}'>{text}</span>")
 }
 
@@ -126,5 +137,26 @@ mod tests {
     fn visible_len_ignores_pango_tags_and_counts_entities_as_one() {
         let s = fg("#fff", "AB&amp;C"); // visible: A B & C = 4
         assert_eq!(visible_len(&s), 4);
+    }
+
+    #[test]
+    fn an_empty_color_emits_the_text_with_no_markup_at_all() {
+        assert_eq!(fg("", "AB"), "AB");
+    }
+
+    #[test]
+    fn an_empty_color_keeps_the_bold_weight_and_drops_only_the_tint() {
+        let bold = bold_fg("", "AB");
+        assert_eq!(bold, "<span font_weight='bold'>AB</span>");
+        assert!(!bold.contains("foreground"));
+    }
+
+    #[test]
+    fn a_tinted_and_an_untinted_cell_measure_the_same_width() {
+        assert_eq!(visible_len(&fg("#fff", "12")), visible_len(&fg("", "12")));
+        assert_eq!(
+            visible_len(&bold_fg("#fff", "12")),
+            visible_len(&bold_fg("", "12"))
+        );
     }
 }

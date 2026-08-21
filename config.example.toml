@@ -132,9 +132,3 @@ symbol = "us10y"
 # label = "MSFT"
 # provider = "finnhub"
 # symbol = "MSFT"
-#
-# Stooq — no key, but often behind an anti-bot wall (then shows "n/d"):
-# [[asset]]
-# label = "TSLA"
-# provider = "stooq"
-# symbol = "tsla.us"

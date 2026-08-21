@@ -1,5 +1,6 @@
 pub mod cache;
 pub mod config;
+pub mod data;
 pub mod http;
 pub mod icons;
 pub mod market;

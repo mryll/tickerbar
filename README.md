@@ -368,6 +368,8 @@ The bar shows your list from `display.bar` as a compact strip with tinted prices
 
 The panel never scrolls. Long watchlists wrap into side-by-side columns and into bands below. The core computes the packing one time, in the same code that lays out the Waybar tooltip. It sends the plan inside the structured JSON (`layout.bands`). The panel only draws it.
 
+The horizontal rule in the screenshot above is a band break. The columns wrap when their number goes above `tooltip_max_columns`, and each band of columns gets a rule above it. The screenshot uses `tooltip_max_columns = 2`, so the three columns of that watchlist become a band of two and a band of one. Raise the limit and the rule goes away.
+
 Both frontends obey `tooltip_rows_per_column` and `tooltip_max_columns`. There is one honest difference at `tooltip_rows_per_column = 0`. The Waybar tooltip draws one column. The panel measures how many lines and columns its screen can hold, then sends the measurements as `--rows-per-column` and `--max-columns`. The core applies them only where the config left the value at 0, and it uses `--max-columns` only to make the limit smaller. A value above 0 in the config pins both frontends to the same fixed layout.
 
 The plugin also answers the shell's IPC, so a keybind or a script can drive it without the mouse:

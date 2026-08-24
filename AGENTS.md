@@ -19,6 +19,8 @@
 
 ## Project-Specific Patterns
 
+- **`screenshots/demo/demo-data` RE-IMPLEMENTS the renderer in bash.** It emits the whole Waybar document — bar strip, tooltip, structured JSON — from a fixed watchlist instead of calling the binary. The README screenshots come from it, so a change to the tooltip's shape has to be mirrored there in the same commit, or the published screenshots stop showing the product. `MAX_COLUMNS`/`ROWS_PER_COLUMN` near the top of the file decide the banding the screenshots show.
+
 - Vertical Slice Architecture: each data source is a self-contained slice in `src/providers/`; cross-cutting code is in `src/platform/`. There is **no `Provider` trait** — `providers::mod` dispatches via a `match` on `ProviderKind`.
 - Adding a provider = new `src/providers/<name>.rs` (with a pure `parse`/`parse_one` + `#[cfg(test)]` tests) + a `ProviderKind` variant + arms in `providers::{ttl, fetch_kind}`, `platform::icons::kind_glyph`, `platform::render::group_of` (maps the source to a `TooltipGroup`), and `platform::market::spec` (market calendar, or `None` for 24/7). The tooltip groups by `TooltipGroup` derived from `cfg.assets`, not by `ProviderKind`.
 - Caching lives only in `platform::cache::get_or_fetch(key, ttl, now, fetch_fn)`; slices never cache. Test error/backoff paths by faking the `fetch_fn` closure; test provider HTTP wiring with `mockito` via `Http::with_base_url`; test parsers with fixtures in `tests/fixtures/`.

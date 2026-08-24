@@ -500,9 +500,7 @@ pub(crate) fn group_of(src: &AssetSource) -> TooltipGroup {
     match src {
         AssetSource::Coingecko { .. } => TooltipGroup::Crypto,
         AssetSource::Dolarapi { .. } => TooltipGroup::FiatArs,
-        AssetSource::Finnhub { .. } | AssetSource::Cnbc { .. } => {
-            TooltipGroup::Stocks
-        }
+        AssetSource::Finnhub { .. } | AssetSource::Cnbc { .. } => TooltipGroup::Stocks,
         AssetSource::Commodity { .. } => TooltipGroup::Commodities,
         AssetSource::Index { .. } => TooltipGroup::Indices,
         AssetSource::Rate { .. } => TooltipGroup::Rates,
@@ -526,7 +524,7 @@ enum TooltipLine {
     },
 }
 
-/// Column-aligned, class-grouped, optionally multi-column framed tooltip.
+/// Column-aligned, class-grouped, optionally multi-column tooltip.
 fn build_tooltip(
     assets: &[Asset],
     quotes: &[Quote],
@@ -540,7 +538,6 @@ fn build_tooltip(
     // Framed = box + Mono Nerd Font pin (columns aligned under any bar font). Plain
     // (default) = no border/pin, and chrome glyphs (group/closed/clock) are dropped
     // so nothing in measured/columnar content depends on Nerd glyph metrics.
-    let frame = display.frame;
     // Inner data-column widths are GLOBAL (computed across all quotes) so every data row is
     // uniform regardless of which tooltip-column it lands in.
     let label_w = quotes
@@ -642,7 +639,6 @@ fn build_tooltip(
             group_closed.get(group).copied().unwrap_or(false),
             &group_sources,
             colors,
-            frame,
         ),
         TooltipLine::Row { text, .. } => text.clone(),
     };
@@ -650,12 +646,9 @@ fn build_tooltip(
         .iter()
         .map(|c| c.iter().map(&render_line).collect())
         .collect();
-    // Plain mode uses spaces (same 3-cell gap) instead of the box-drawing divider.
-    let sep = if frame {
-        waybar::fg(&colors.dim, " │ ")
-    } else {
-        "   ".to_string()
-    };
+    // The column divider is box drawing: safe now that the tooltip pins a
+    // monospace font, and it is what makes the table read as a table.
+    let sep = waybar::fg(&colors.dim, " │ ");
     // Cap columns per band; extra columns wrap into a new band stacked below (narrow/vertical
     // monitors). When not banding, keep per-column widths so the layout is unchanged.
     let band_size = band_size(col_strs.len(), display.tooltip_max_columns);
@@ -736,59 +729,32 @@ fn build_tooltip(
     measurable.push(footer.as_str());
     let width = waybar::content_width(&measurable).max(waybar::visible_len(&title));
 
-    // Framed wraps each line in `│ … │` with top/bottom borders; plain emits the
-    // raw line and a plain dim rule for separators (no right edge to misalign).
-    let row = |content: &str| {
-        if frame {
-            waybar::border_line(content, width, &colors.border)
-        } else {
-            content.to_string()
-        }
-    };
-    let rule = || {
-        if frame {
-            waybar::separator(width, &colors.border, &colors.dim)
-        } else {
-            waybar::fg(&colors.dim, &"─".repeat(width))
-        }
-    };
+    // One tooltip shape, pinned to a monospace font. The pin is not decoration:
+    // this tooltip is a TABLE, and its rules are box-drawing characters. In a
+    // proportional font the columns stop lining up and the rules render far
+    // wider than the text they underline, so the tooltip sizes itself to the
+    // rules and grows a dead margin on its right. Waybar draws the tooltip in a
+    // GTK window that IGNORES font-family from CSS, so the markup is the only
+    // place this can be said.
+    let rule = || waybar::fg(&colors.dim, &"─".repeat(width));
 
-    let mut out: Vec<String> = Vec::new();
-    if frame {
-        out.push(waybar::top_border(width, &colors.border));
-        let left = width.saturating_sub(waybar::visible_len(&title)) / 2;
-        out.push(waybar::border_line(
-            &format!("{}{}", " ".repeat(left), title),
-            width,
-            &colors.border,
-        ));
-    } else {
-        out.push(title.clone());
-    }
-    out.push(rule());
+    let mut out: Vec<String> = vec![title.clone(), rule()];
     for (i, band) in bands.iter().enumerate() {
         if i > 0 {
             out.push(rule());
         }
         for line in band {
-            out.push(row(line));
+            out.push(line.clone());
         }
     }
     out.push(rule());
-    out.push(row(&footer));
-    if frame {
-        out.push(waybar::bottom_border(width, &colors.border));
-    }
+    out.push(footer.clone());
 
     let body = out.join("\n");
-    if frame {
-        format!(
-            "<span font_family='{}'>{body}</span>",
-            waybar::pango_escape(&display.frame_font).replace('\'', "&apos;")
-        )
-    } else {
-        body
-    }
+    format!(
+        "<span font_family='{}'>{body}</span>",
+        waybar::pango_escape(&display.tooltip_font).replace('\'', "&apos;")
+    )
 }
 
 fn render_header(
@@ -797,7 +763,6 @@ fn render_header(
     closed: bool,
     sources: &HashMap<TooltipGroup, Vec<&'static str>>,
     colors: &ThemeColors,
-    frame: bool,
 ) -> String {
     let src = sources.get(&group).map(|v| v.join("·")).unwrap_or_default();
     let src_part = if src.is_empty() {
@@ -810,20 +775,11 @@ fn render_header(
     } else {
         String::new()
     };
-    // Plain mode drops the Nerd group glyph and the pause glyph (PUA widths are
-    // unreliable without a pinned font, and headers sit above aligned columns).
-    let glyph_part = if frame {
-        format!("{} ", waybar::fg(&colors.accent, group.glyph()))
-    } else {
-        String::new()
-    };
+    // The Nerd glyphs are safe on every path now: the tooltip pins a monospace
+    // font, so their PUA advance is one cell and the columns below still align.
+    let glyph_part = format!("{} ", waybar::fg(&colors.accent, group.glyph()));
     let closed_part = if closed {
-        let label = if frame {
-            "  \u{f04c} closed"
-        } else {
-            "  closed"
-        };
-        waybar::fg(&colors.dim, label)
+        waybar::fg(&colors.dim, "  \u{f04c} closed")
     } else {
         String::new()
     };
@@ -1057,7 +1013,7 @@ mod tests {
             tooltip_max_columns: 0,
             tooltip_range: false,
             frame: false,
-            frame_font: "JetBrainsMono Nerd Font Mono".into(),
+            tooltip_font: "JetBrainsMono Nerd Font Mono, JetBrainsMono Nerd Font, monospace".into(),
         }
     }
 
@@ -1800,15 +1756,21 @@ mod tests {
             banded.lines().count() > wide.lines().count(),
             "banding should stack columns into more (shorter) rows"
         );
-        let widths: Vec<usize> = banded.lines().map(waybar::visible_len).collect();
+        // Without a box the lines no longer share one width; what has to hold
+        // is that the DATA rows still line up as columns.
+        let row_widths: Vec<usize> = banded
+            .lines()
+            .filter(|l| l.contains("SYM"))
+            .map(waybar::visible_len)
+            .collect();
         assert!(
-            widths.windows(2).all(|w| w[0] == w[1]),
-            "framed lines equal width"
+            row_widths.windows(2).all(|w| w[0] == w[1]),
+            "data rows lost their column alignment: {row_widths:?}"
         );
     }
 
     #[test]
-    fn all_tooltip_lines_have_equal_visible_width() {
+    fn tooltip_data_rows_have_equal_visible_width() {
         let assets: Vec<Asset> = (0..10)
             .map(|i| Asset {
                 label: format!("SYM{i}"),
@@ -1830,7 +1792,6 @@ mod tests {
             .collect();
         let mut d = disp(DisplayMode::Fixed, 3);
         d.tooltip_rows_per_column = 4; // force multiple columns
-        d.frame = true; // equal-width is a framed-box property
         let tip = build_tooltip(
             &assets,
             &qs,
@@ -1839,15 +1800,21 @@ mod tests {
             &ThemeColors::default(),
             Utc::now(),
         );
-        let widths: Vec<usize> = tip.lines().map(waybar::visible_len).collect();
+        // The DATA rows are the ones that must line up; the title and the
+        // footer are shorter on purpose.
+        let row_widths: Vec<usize> = tip
+            .lines()
+            .filter(|l| l.contains("SYM"))
+            .map(waybar::visible_len)
+            .collect();
         assert!(
-            widths.windows(2).all(|w| w[0] == w[1]),
-            "all framed lines equal width"
+            row_widths.windows(2).all(|w| w[0] == w[1]),
+            "data rows lost their column alignment: {row_widths:?}"
         );
     }
 
     #[test]
-    fn plain_tooltip_is_borderless_unpinned_and_glyph_free_but_aligned() {
+    fn the_tooltip_is_borderless_pinned_and_column_aligned() {
         let assets: Vec<Asset> = (0..3)
             .map(|i| Asset {
                 label: format!("SYM{i}"),
@@ -1867,7 +1834,7 @@ mod tests {
                 )
             })
             .collect();
-        let d = disp(DisplayMode::Fixed, 3); // frame defaults to false → plain
+        let d = disp(DisplayMode::Fixed, 3);
         let tip = build_tooltip(
             &assets,
             &qs,
@@ -1876,13 +1843,15 @@ mod tests {
             &ThemeColors::default(),
             Utc::now(),
         );
-        // Plain mode: no box-drawing borders and no pinned font.
-        assert!(!tip.contains('╭') && !tip.contains('╰') && !tip.contains('│'));
-        assert!(!tip.contains("font_family"));
-        // Header keeps the group label text but drops the Nerd group glyph.
+        // No box, but the font IS pinned: it is what keeps the rules the same
+        // width as the text and the columns lined up.
+        assert!(!tip.contains('╭') && !tip.contains('╰'));
+        assert!(tip.contains("font_family="));
+        // The header keeps its label AND its Nerd group glyph: with the font
+        // pinned, the glyph's advance is one cell and nothing below shifts.
         let g = group_of(&assets[0].source);
         assert!(tip.contains(g.label()));
-        assert!(!tip.contains(g.glyph()));
+        assert!(tip.contains(g.glyph()));
         // Data rows stay column-aligned even without a frame (uniform visible width).
         let row_widths: Vec<usize> = tip
             .lines()
@@ -2040,8 +2009,10 @@ mod tests {
     fn monochrome_keeps_the_structure_glyphs_and_the_direction_sign() {
         let plain = built(ColorMode::NONE);
 
-        // Box drawing, the bold weight and the ascii arrows all survive.
-        assert!(plain.tooltip.contains('╭') && plain.tooltip.contains('│'));
+        // Box drawing (the rules — the ─ that separate the sections), the bold
+        // weight and the ascii arrows all survive. The │ column divider only
+        // appears once the watchlist needs more than one column.
+        assert!(plain.tooltip.contains('─'));
         assert!(plain.tooltip.contains("font_weight='bold'"));
         assert!(plain.text.contains('^') && plain.text.contains('v'));
         // Direction stays readable in the tooltip through the signed change column,

@@ -47,14 +47,25 @@ pub struct Display {
     /// (currently CNBC-backed assets). Off by default to keep the tooltip compact.
     #[serde(default)]
     pub tooltip_range: bool,
-    /// Draw the framed tooltip box and pin `JetBrainsMono Nerd Font Mono` so columns
-    /// stay aligned under any bar font. Off (default) = plain, borderless, no font
-    /// pin — renders in the user's font; needs no specific font installed.
+    /// DEPRECATED, still accepted so an existing config keeps loading. It drew
+    /// a bordered card around the tooltip and now does nothing.
     #[serde(default)]
+    #[allow(dead_code)]
     pub frame: bool,
-    /// Font family pinned in framed mode — must be a complete Mono Nerd Font.
-    #[serde(default = "default_frame_font")]
-    pub frame_font: String,
+    /// The tooltip is pinned to this family. A Pango family LIST, not one name:
+    /// Pango tries them in order and falls through when one is not installed —
+    /// the Arch package ttf-jetbrains-mono-nerd does NOT ship the "…Mono"
+    /// family, so pinning only that name fell back to the system's proportional
+    /// font without saying so.
+    ///
+    /// It must be monospace: the tooltip is a table, and its rules are
+    /// box-drawing characters. In a proportional font the columns stop lining
+    /// up and the rules render far wider than the text they underline, so the
+    /// tooltip sizes itself to the rules and grows a dead margin on its right.
+    /// Waybar draws the tooltip in a GTK window that ignores font-family from
+    /// CSS, so the markup is the only place to say it.
+    #[serde(default = "default_tooltip_font", alias = "frame_font")]
+    pub tooltip_font: String,
 }
 
 fn default_rotate_interval() -> u64 {
@@ -75,8 +86,8 @@ fn default_bar_format() -> String {
 fn default_bar_layout() -> String {
     "{summary}   {bar}".into()
 }
-fn default_frame_font() -> String {
-    "JetBrainsMono Nerd Font Mono".into()
+fn default_tooltip_font() -> String {
+    "JetBrainsMono Nerd Font Mono, JetBrainsMono Nerd Font, monospace".into()
 }
 
 impl Display {
@@ -124,7 +135,7 @@ impl Default for Display {
             tooltip_max_columns: 0,
             tooltip_range: false,
             frame: false,
-            frame_font: default_frame_font(),
+            tooltip_font: default_tooltip_font(),
         }
     }
 }

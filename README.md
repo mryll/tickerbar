@@ -5,14 +5,27 @@
 
 A multi-market price ticker for [Waybar](https://github.com/Alexays/Waybar) and the [Omarchy](https://omarchy.org) shell. It shows crypto, stocks, indices, commodities, forex and Treasury yields in one widget. Every default provider needs **no API key**. Finnhub is the one exception, and it is optional.
 
-<p align="center">
-  <img src="screenshots/omarchy-panel.png" alt="tickerbar panel in the Omarchy shell" width="794">
-</p>
+The same core drives both frontends, so a number reads the same on either one:
 
-<p align="center">
-  <em>Click the bar strip to open the full table. Move the pointer onto the Waybar module to get the same table as a tooltip:</em><br><br>
-  <img src="screenshots/waybar-tooltip.png" alt="tickerbar tooltip in Waybar" width="820">
-</p>
+| The Omarchy shell plugin | The Waybar module |
+| :---: | :---: |
+| <img src="screenshots/omarchy-desktop.png" alt="tickerbar in the Omarchy shell: the bar strip and the price table"> | <img src="screenshots/waybar-desktop.png" alt="tickerbar in Waybar: the bar strip and the price table"> |
+
+## Contents
+
+- [Why tickerbar?](#why-tickerbar)
+- [Screenshots](#screenshots)
+- [Requirements](#requirements)
+- [Installation](#installation)
+- [Quick start](#quick-start)
+- [Configuration](#configuration)
+- [Waybar integration](#waybar-integration)
+- [Theming](#theming)
+- [Omarchy shell plugin](#omarchy-shell-plugin)
+- [Structured JSON output](#structured-json-output)
+- [Troubleshooting](#troubleshooting)
+- [Development](#development)
+- [Related](#related)
 
 ## Why tickerbar?
 
@@ -27,7 +40,7 @@ A multi-market price ticker for [Waybar](https://github.com/Alexays/Waybar) and 
 
 | Waybar bar and tooltip | Omarchy bar strip |
 |:---:|:---:|
-| ![Waybar bar and tooltip](screenshots/waybar-tooltip-simple.png) | ![Omarchy bar strip](screenshots/omarchy-bar.png) |
+| ![Waybar bar and tooltip](screenshots/waybar-tooltip.png) | ![Omarchy bar strip](screenshots/omarchy-bar.png) |
 
 The framed tooltip draws a box and pins a Mono Nerd Font, so columns stay aligned under any bar font:
 
@@ -58,6 +71,11 @@ To install for all users, run `sudo make install`.
 
 <p align="center">
   <img src="screenshots/waybar-bar.png" alt="tickerbar in Waybar" width="800">
+</p>
+
+<p align="center">
+  <em>Move the pointer onto the strip to get the full table:</em><br><br>
+  <img src="screenshots/waybar-tooltip.png" alt="The tickerbar tooltip: the full price table" width="820">
 </p>
 
 ## Quick start
@@ -322,15 +340,22 @@ The Waybar tooltip follows the same themes:
 
 tickerbar also has a native widget for the [Omarchy shell](https://github.com/basecamp/omarchy), in the `omarchy/` directory.
 
-<p align="center">
-  <img src="screenshots/omarchy-desktop.png" alt="tickerbar in the Omarchy bar, with its panel open" width="960">
-</p>
-
 The bar shows your list from `display.bar` as a compact strip with tinted prices, each one led by its asset-class mark. A click opens a themed panel. The panel starts with a header that gives the asset count and the number of markets that are open. Below the header, the full watchlist is a real table, grouped by asset class. The header also carries the watchlist average, which the panel shows by default. Use `summaryMode` to control it. A value of `hide` removes the average from the bar and from the panel. Closed markets are dim, and a footer gives the time of the last update. A middle click gets new data. The footer of the panel ends with a refresh control (󰑐), next to the time of the last update. The control stays disabled while a fetch runs.
+
+<p align="center">
+  <img src="screenshots/omarchy-panel.png" alt="The tickerbar panel: the full watchlist as a table, grouped by asset class" width="794">
+</p>
 
 The panel never scrolls. Long watchlists wrap into side-by-side columns and into bands below. The core computes the packing one time, in the same code that lays out the Waybar tooltip. It sends the plan inside the structured JSON (`layout.bands`). The panel only draws it.
 
 Both frontends obey `tooltip_rows_per_column` and `tooltip_max_columns`. There is one honest difference at `tooltip_rows_per_column = 0`. The Waybar tooltip draws one column. The panel measures how many lines and columns its screen can hold, then sends the measurements as `--rows-per-column` and `--max-columns`. The core applies them only where the config left the value at 0, and it uses `--max-columns` only to make the limit smaller. A value above 0 in the config pins both frontends to the same fixed layout.
+
+The plugin also answers the shell's IPC, so a keybind or a script can drive it without the mouse:
+
+```bash
+qs ipc call mryll.tickerbar toggle    # open or close the panel
+qs ipc call mryll.tickerbar refresh   # fetch now, without opening anything
+```
 
 ### Install the plugin
 
@@ -425,9 +450,10 @@ PATH="$PWD/screenshots/demo:$PATH" waybar
 
 ## Related
 
-- [claudebar](https://github.com/mryll/claudebar) — Claude AI usage widget for Waybar
-- [codexbar](https://github.com/mryll/codexbar) — OpenAI Codex usage widget for Waybar
-- [logibar](https://github.com/mryll/logibar) — Logitech battery widgets for Waybar
-- [meteobar](https://github.com/mryll/meteobar) — Weather widget for Waybar (Open-Meteo)
-- [Omarchy](https://github.com/basecamp/omarchy) — Beautiful, modern & opinionated Linux distribution
-- [Waybar](https://github.com/Alexays/Waybar) — Status bar for Wayland compositors
+- [claudebar](https://github.com/mryll/claudebar) — Claude AI plan usage
+- [codexbar](https://github.com/mryll/codexbar) — OpenAI Codex subscription usage
+- [logibar](https://github.com/mryll/logibar) — the battery of Logitech devices
+- [meteobar](https://github.com/mryll/meteobar) — the weather, from Open-Meteo
+- [printbar](https://github.com/mryll/printbar) — any printer: supplies, trays and queue
+- [Omarchy](https://github.com/basecamp/omarchy) — the Linux setup for these widgets
+- [Waybar](https://github.com/Alexays/Waybar) — the status bar for Wayland

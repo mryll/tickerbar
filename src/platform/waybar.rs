@@ -36,32 +36,6 @@ pub fn bold_fg(color: &str, text: &str) -> String {
     format!("<span font_weight='bold' foreground='{color}'>{text}</span>")
 }
 
-pub fn border_line(content: &str, width: usize, border_color: &str) -> String {
-    let pad = width.saturating_sub(visible_len(content));
-    let right_pad = " ".repeat(pad);
-    format!(
-        "{} {content}{right_pad} {}",
-        fg(border_color, "│"),
-        fg(border_color, "│")
-    )
-}
-
-pub fn separator(width: usize, border_color: &str, dim_color: &str) -> String {
-    border_line(&fg(dim_color, &"─".repeat(width)), width, border_color)
-}
-
-pub fn empty_line(width: usize, border_color: &str) -> String {
-    border_line(&" ".repeat(width), width, border_color)
-}
-
-pub fn top_border(width: usize, border_color: &str) -> String {
-    fg(border_color, &format!("╭{}╮", "─".repeat(width + 2)))
-}
-
-pub fn bottom_border(width: usize, border_color: &str) -> String {
-    fg(border_color, &format!("╰{}╯", "─".repeat(width + 2)))
-}
-
 /// Visible (rendered) width of a string, ignoring Pango tags and counting entities as one.
 pub fn visible_len(s: &str) -> usize {
     let mut plain = String::with_capacity(s.len());
@@ -101,9 +75,10 @@ pub fn content_width(items: &[&str]) -> usize {
         .max(MIN_WIDTH)
 }
 
-/// Generic plain error tooltip for the never-crash fallback paths. Rendered
-/// borderless and without a font pin so it displays correctly in any font —
-/// config (and thus the frame preference) may be unavailable on these paths.
+/// Generic error tooltip for the never-crash fallback paths. Left unpinned on
+/// purpose: it is one header plus one line, so there is no column to keep and
+/// no rule long enough to overshoot — and the config, which is where the font
+/// is named, may be exactly what failed to load here.
 pub fn error_output(
     title: &str,
     message: &str,

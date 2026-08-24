@@ -21,6 +21,7 @@ The same core drives both frontends, so a number reads the same on either one:
 - [Configuration](#configuration)
 - [Waybar integration](#waybar-integration)
 - [Theming](#theming)
+- [Tooltip font](#tooltip-font)
 - [Omarchy shell plugin](#omarchy-shell-plugin)
 - [Structured JSON output](#structured-json-output)
 - [Troubleshooting](#troubleshooting)
@@ -42,14 +43,14 @@ The same core drives both frontends, so a number reads the same on either one:
 |:---:|:---:|
 | ![Waybar bar and tooltip](screenshots/waybar-tooltip.png) | ![Omarchy bar strip](screenshots/omarchy-bar.png) |
 
-The framed tooltip draws a box and pins a Mono Nerd Font, so columns stay aligned under any bar font:
+A long watchlist wraps into side-by-side columns and into bands below:
 
-![Framed tooltip with three columns](screenshots/waybar-tooltip-full.png)
+![The tooltip with three columns](screenshots/waybar-tooltip-full.png)
 
 ## Requirements
 
 - [Waybar](https://github.com/Alexays/Waybar), or the [Omarchy](https://omarchy.org) shell for the native widget
-- A [Nerd Font](https://www.nerdfonts.com/) for the glyphs. Set `icons = "ascii"` if you do not have one. A Mono Nerd Font is necessary only for the framed tooltip (`frame = true`).
+- A **monospace** [Nerd Font](https://www.nerdfonts.com/) for the glyphs and for the tooltip's columns. Set `icons = "ascii"` if you do not have one. Refer to [Tooltip font](#tooltip-font).
 
 ## Installation
 
@@ -120,8 +121,9 @@ bar_layout = "{summary}   {bar}"
 tooltip_rows_per_column = 0
 tooltip_max_columns = 0
 tooltip_range = false
-frame = false
-frame_font = "JetBrainsMono Nerd Font Mono"
+# The family the tooltip is pinned to — a Pango family list, tried in order.
+# It must be monospace. Refer to "Tooltip font".
+tooltip_font = "JetBrainsMono Nerd Font Mono, JetBrainsMono Nerd Font, monospace"
 ```
 
 | Key | Default | What it does |
@@ -137,8 +139,8 @@ frame_font = "JetBrainsMono Nerd Font Mono"
 | `tooltip_rows_per_column` | `0` | Start a new column after N lines. `0` means one column. |
 | `tooltip_max_columns` | `0` | The most columns side by side. Extra columns move to a band below. `0` means no limit. |
 | `tooltip_range` | `false` | Add the low-high range of the day to each row. |
-| `frame` | `false` | Draw the box and pin `frame_font`. |
-| `frame_font` | `JetBrainsMono Nerd Font Mono` | The font to pin. It must be a complete Mono Nerd Font. |
+| `tooltip_font` | `JetBrainsMono Nerd Font Mono, JetBrainsMono Nerd Font, monospace` | The family the tooltip is pinned to. It must be monospace — refer to [Tooltip font](#tooltip-font). |
+| `frame`, `frame_font` | — | **DEPRECATED**, still accepted. `frame` drew a bordered card and is now a no-op; `frame_font` is an alias for `tooltip_font`. |
 
 > [!NOTE]
 > Format strings are Pango markup. Write a literal `&`, `<` or `>` as `&amp;`, `&lt;` or `&gt;`.
@@ -336,6 +338,24 @@ The Waybar tooltip follows the same themes:
 >
 > **The Omarchy bar strip has more color than before.** It used a weak tint of its own. It now paints the color that the core publishes, which is the color the Waybar bar already used.
 
+## Tooltip font
+
+The tooltip is pinned to a monospace font. That is not decoration: this tooltip is a **table** — without one advance per character the columns stop lining up, and its rules are box-drawing characters, and in a proportional font one of those is nearly twice as wide as a letter. The tooltip then sizes itself to the rules, and a dead margin opens to the right of the text. Waybar draws the tooltip in a GTK window that ignores `font-family` from your CSS, so the markup is the only place this can be said.
+
+The default is a **list** of families, tried in order:
+
+```toml
+[display]
+tooltip_font = "JetBrainsMono Nerd Font Mono, JetBrainsMono Nerd Font, monospace"
+```
+
+Pango falls through to the next name when one is not installed. This matters: the Arch package `ttf-jetbrains-mono-nerd` does **not** ship the `…Mono` family, so pinning that one name alone used to fall back to your system's proportional font without saying so.
+
+> [!NOTE]
+> **`frame` and `frame_font` are deprecated.** `frame` drew the tooltip as a bordered card. It is still accepted, so an existing config keeps loading, but it now does nothing; `frame_font` is an alias for `tooltip_font`.
+>
+> The box was a second way of drawing the same content — more code, more documentation, more screenshots — and it only lined up when the pinned font was a complete Mono Nerd Font. Pinning the font on the one remaining tooltip gives the alignment without the box.
+
 ## Omarchy shell plugin
 
 tickerbar also has a native widget for the [Omarchy shell](https://github.com/basecamp/omarchy), in the `omarchy/` directory.
@@ -428,7 +448,7 @@ A row with no change for the day shows a percent with no sign, for example ` 0.0
 | The module shows `?` and an error tooltip | The config file is bad, or a necessary key is absent. The tooltip gives the message. |
 | The Omarchy widget says the binary is absent | `tickerbar` is not on `PATH`. Run `make install PREFIX=~/.local`, or install the AUR package. |
 | A stock or an index shows `n/d` | The market is closed, or the provider does not know the symbol. Test it with `tickerbar --output json` (see [Stocks outside the United States](#stocks-outside-the-united-states)). |
-| The columns do not align | Your bar font is not monospace. Set `frame = true` to pin a Mono Nerd Font, or set `icons = "ascii"`. |
+| The columns do not align | The pinned font is not monospace. Name a monospace family with `tooltip_font`, or leave the default. |
 | The colors do not follow my theme | Install the current version. Older versions read a path that current Omarchy no longer writes. |
 | An edit to the plugin does nothing | Run `omarchy restart shell`. |
 | The bar is too wide | Make `max_on_bar` smaller, or put only the labels that you want in `bar`. |

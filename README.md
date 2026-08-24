@@ -71,7 +71,7 @@ make install PREFIX=~/.local
 To install for all users, run `sudo make install`.
 
 <p align="center">
-  <img src="screenshots/waybar-bar.png" alt="tickerbar in Waybar" width="800">
+  <img src="screenshots/waybar-bar.png" alt="tickerbar in Waybar" width="726">
 </p>
 
 <p align="center">

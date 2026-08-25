@@ -791,6 +791,7 @@ Panel {
         spacing: Style.space(14)
 
         Text {
+          textFormat: Text.PlainText
           visible: root.snapshot === null && root.topError === ""
           text: "Fetching prices…"
           color: root.mutedFg
@@ -874,6 +875,7 @@ Panel {
                 spacing: Style.space(7)
 
                 Text {
+                  textFormat: Text.PlainText
                   id: chipValue
                   text: root.changeText(root.summaryAvg, root.summaryDir)
                   color: root.panelDirColor(root.summaryDir)
@@ -886,6 +888,7 @@ Panel {
                 }
 
                 Text {
+                  textFormat: Text.PlainText
                   anchors.baseline: chipValue.baseline
                   text: "avg"
                   color: root.mutedFg
@@ -1016,6 +1019,7 @@ Panel {
                           }
 
                           Text {
+                            textFormat: Text.PlainText
                             visible: segBlock.modelData.continued === true
                             anchors.baseline: sectionHeader.baseline
                             text: "(cont.)"
@@ -1025,6 +1029,7 @@ Panel {
                           }
 
                           Text {
+                            textFormat: Text.PlainText
                             visible: segBlock.modelData.closed === true
                             anchors.baseline: sectionHeader.baseline
                             text: "\uf04c closed"
@@ -1103,6 +1108,7 @@ Panel {
               spacing: Style.space(4)
 
               Text {
+                textFormat: Text.PlainText
                 anchors.verticalCenter: parent.verticalCenter
                 text: "󰅐  Updated " + (root.updatedText !== "" ? root.updatedText : "—")
                 color: root.mutedFg

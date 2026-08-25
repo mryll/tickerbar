@@ -385,6 +385,19 @@ qs ipc call mryll.tickerbar refresh   # fetch now, without opening anything
 
 ### Install the plugin
 
+From the marketplace, or from this repository directly:
+
+```bash
+omarchy plugin add https://github.com/mryll/tickerbar.git --enable
+```
+
+That clones the repository into `~/.config/omarchy/plugins/mryll.tickerbar` and
+validates the manifest before it is enabled. To remove it later:
+`omarchy plugin remove mryll.tickerbar`.
+
+The plugin runs the `tickerbar` binary from your PATH, so install that too — from the AUR (`yay -S tickerbar-bin`) or with `make install PREFIX=~/.local`.
+
+For development, link the working copy instead of cloning a second one.
 `make install-omarchy` makes a symbolic link from the repository root to `~/.config/omarchy/plugins/mryll.tickerbar`. The manifest is in that root and points to `omarchy/`.
 
 ```bash

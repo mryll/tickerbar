@@ -176,3 +176,74 @@ fn the_structured_document_always_publishes_a_real_palette() {
         );
     }
 }
+
+/// The write side of the same hang the bounded reader closes. Every cache path
+/// is predictable, so anything that can write `$XDG_CACHE_HOME/tickerbar/` can
+/// plant a FIFO at the lock path — and an `open` for write on a FIFO with no
+/// reader blocks for ever. The binary then never exits, which under `timeout`
+/// is exit 124 and, inside omarchy-shell, a widget that hangs its host.
+///
+/// A finnhub asset with no `FINNHUB_TOKEN` reaches the cache without touching
+/// the network: the provider reports every symbol Missing instead of fetching.
+#[cfg(unix)]
+#[test]
+fn a_fifo_planted_at_the_cache_lock_path_still_exits_zero_with_valid_json() {
+    use std::time::Duration;
+
+    let root = std::env::temp_dir().join(format!(
+        "tickerbar-fifo-e2e-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let cache = root.join("cache");
+    std::fs::create_dir_all(&cache).unwrap();
+    let cfg = root.join("config.toml");
+    std::fs::write(
+        &cfg,
+        "[[asset]]\nlabel = \"AAPL\"\nprovider = \"finnhub\"\nsymbol = \"AAPL\"\n",
+    )
+    .unwrap();
+
+    let args = ["--output", "json", "--config", cfg.to_str().unwrap()];
+    let run = || {
+        Command::cargo_bin("tickerbar")
+            .unwrap()
+            .env("XDG_CACHE_HOME", &cache)
+            .env_remove("FINNHUB_TOKEN")
+            .timeout(Duration::from_secs(20))
+            .args(args)
+            .assert()
+            .success()
+    };
+
+    // First run only exists to create the lock file, whose name is a hash of
+    // the request key this test deliberately does not reimplement.
+    run();
+    let locks: Vec<std::path::PathBuf> = std::fs::read_dir(cache.join("tickerbar"))
+        .expect("the cache dir exists after a run")
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| p.extension().is_some_and(|x| x == "lock"))
+        .collect();
+    assert!(
+        !locks.is_empty(),
+        "no lock file to replace — this test would prove nothing"
+    );
+
+    for lock in &locks {
+        std::fs::remove_file(lock).unwrap(); // mkfifo refuses an existing path
+        let c = std::ffi::CString::new(lock.to_str().unwrap()).unwrap();
+        assert_eq!(
+            unsafe { libc::mkfifo(c.as_ptr(), 0o600) },
+            0,
+            "mkfifo failed"
+        );
+    }
+
+    let assert = run();
+    let out = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    assert_valid_data_json(&out);
+    let _ = std::fs::remove_dir_all(&root);
+}

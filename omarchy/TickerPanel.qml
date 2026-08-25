@@ -645,15 +645,21 @@ Panel {
 
   function finalizeRun() {
     var text = capturedText.trim()
-    if (text === "")
+    if (text === "") {
+      // Only if nothing already explained it. The StdioCollector tripwire also
+      // leaves capturedText empty, and there "not installed" is false: the
+      // binary answered — it answered too much.
+      //
       // The install hint lives HERE and not in the core, which is where every
       // other message of this family lives. The one message the core cannot
       // emit is the one about its own absence.
-      setError(binName + " produced no output — not installed or not on PATH?\n\n"
-               + "Install it with:  yay -S tickerbar-bin\n"
-               + "Then open this panel again.")
-    else
+      if (root.runError === "")
+        setError(binName + " produced no output — not installed or not on PATH?\n\n"
+                 + "Install it with:  yay -S tickerbar-bin\n"
+                 + "Then open this panel again.")
+    } else {
       handle(text)
+    }
     if (pendingCmd) {
       var c = pendingCmd
       pendingCmd = null

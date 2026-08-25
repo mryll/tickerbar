@@ -76,13 +76,85 @@ fn read_record(path: &Path) -> Option<Record> {
     Some(rec)
 }
 
+/// Open a path for writing, refusing anything that is not a regular file.
+///
+/// The mirror of `safe_read::read_bounded`, and it exists for the same reason
+/// on the other side of the descriptor: an `open` for WRITE on a FIFO with no
+/// reader blocks for ever, exactly like an `open` for read on one with no
+/// writer. Both cache paths are predictable — `$XDG_CACHE_HOME/tickerbar/` plus
+/// a hash of the request key — so anything that can write that directory can
+/// plant a FIFO there and hang the omarchy-shell process tickerbar runs inside.
+/// A `timeout`-wrapped run comes back as exit 124 instead of a widget.
+///
+/// The same three steps in the same order as the read side: `O_NONBLOCK` on the
+/// open, the type check on the OPEN DESCRIPTOR so nothing can swap the path
+/// afterwards, then clear the flag so no filesystem that honours it on a
+/// regular file (FUSE, a network mount) can turn a good write into `WouldBlock`.
+/// A FIFO with no reader never reaches the check — `O_NONBLOCK` turns that open
+/// into `ENXIO` — and one that HAS a reader opens fine and is caught by it.
+///
+/// No `O_NOFOLLOW`, deliberately, for the same reason as the read side: the
+/// fstat happens after the kernel resolves symlinks, so a symlink to a FIFO is
+/// already refused and a symlink to a regular file is a legitimate setup.
+///
+/// The file is not truncated by the open. `write_record` calls `set_len(0)`
+/// itself, so a tmp file left by a crashed run cannot leave a tail behind.
+fn open_regular_for_write(path: &Path) -> std::io::Result<fs::File> {
+    #[cfg(unix)]
+    let file = {
+        use std::os::unix::fs::OpenOptionsExt;
+        fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(false)
+            .custom_flags(libc::O_NONBLOCK)
+            .open(path)?
+    };
+    #[cfg(not(unix))]
+    let file = fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(false)
+        .open(path)?;
+
+    let meta = file.metadata()?;
+    if !meta.is_file() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!("{} is not a regular file", path.display()),
+        ));
+    }
+
+    #[cfg(unix)]
+    {
+        use std::os::fd::AsRawFd;
+        let fd = file.as_raw_fd();
+        let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
+        if flags != -1 {
+            unsafe { libc::fcntl(fd, libc::F_SETFL, flags & !libc::O_NONBLOCK) };
+        }
+    }
+
+    Ok(file)
+}
+
 fn write_record(path: &Path, rec: &Record) {
     if let Ok(body) = serde_json::to_string(rec) {
         let tmp = path.with_extension("tmp");
-        if fs::write(&tmp, body).is_ok() {
+        // `fs::write` was an unguarded `File::create` on a predictable path.
+        // Everything below stays silent on failure: a cache that cannot be
+        // written is not worth failing a run over.
+        if write_whole(&tmp, body.as_bytes()).is_ok() {
             fs::rename(&tmp, path).ok();
         }
     }
+}
+
+fn write_whole(path: &Path, body: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    let mut f = open_regular_for_write(path)?;
+    f.set_len(0)?;
+    f.write_all(body)
 }
 
 fn served_stale(mut quotes: Vec<Quote>) -> Vec<Quote> {
@@ -118,12 +190,10 @@ where
 {
     let path = key_file(dir, key);
     let lock_path = path.with_extension("lock");
-    let lock = fs::OpenOptions::new()
-        .create(true)
-        .write(true)
-        .truncate(false)
-        .open(&lock_path)
-        .ok();
+    // A lock file that cannot be opened as a regular file degrades to
+    // `have_lock = false`, which is the path this function already takes when
+    // another instance holds it: serve what is cached, never fetch, never block.
+    let lock = open_regular_for_write(&lock_path).ok();
     let have_lock = lock
         .as_ref()
         .map(|l| l.try_lock_exclusive().is_ok())
@@ -274,6 +344,114 @@ mod tests {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_nanos()
+    }
+
+    #[cfg(unix)]
+    fn mkfifo(path: &Path) {
+        let c = std::ffi::CString::new(path.to_str().unwrap()).unwrap();
+        assert_eq!(
+            unsafe { libc::mkfifo(c.as_ptr(), 0o600) },
+            0,
+            "mkfifo failed"
+        );
+    }
+
+    /// Opening a FIFO for write with no reader blocks for ever. Without the
+    /// guard this test never returns — and in production the whole run hangs,
+    /// which under `timeout` is the exit 124 that started this hunt.
+    #[cfg(unix)]
+    #[test]
+    fn a_fifo_planted_at_the_lock_path_is_refused_instead_of_blocking_for_ever() {
+        let dir = tempdir();
+        let t0 = Utc::now() - Duration::seconds(120);
+        let _ = get_or_fetch(
+            &dir,
+            "fifo1",
+            Duration::seconds(60),
+            t0,
+            FetchPolicy::Normal,
+            || Ok(vec![q(42.0, t0)]),
+        );
+        let lockp = key_file(&dir, "fifo1").with_extension("lock");
+        std::fs::remove_file(&lockp).expect("the lock file exists after a run");
+        mkfifo(&lockp);
+
+        let mut called = false;
+        let out = get_or_fetch(
+            &dir,
+            "fifo1",
+            Duration::seconds(0),
+            Utc::now(),
+            FetchPolicy::Normal,
+            || {
+                called = true;
+                Ok(vec![])
+            },
+        );
+        assert!(!called, "an unusable lock must degrade to serving stale");
+        assert_eq!(out[0].state, QuoteState::Stale);
+        assert_eq!(out[0].price, Some(42.0));
+    }
+
+    /// The ENXIO branch above never reaches the type check. A FIFO whose read
+    /// end is already open DOES open for write, so only the fstat on the open
+    /// descriptor stops it — and only this test exercises that branch.
+    #[cfg(unix)]
+    #[test]
+    fn a_fifo_with_a_reader_attached_is_refused_by_the_type_check() {
+        let dir = tempdir();
+        let p = dir.join("readable.fifo");
+        mkfifo(&p);
+        let c = std::ffi::CString::new(p.to_str().unwrap()).unwrap();
+        let rfd = unsafe { libc::open(c.as_ptr(), libc::O_RDONLY | libc::O_NONBLOCK) };
+        assert!(rfd >= 0, "could not open the read end");
+
+        let e = open_regular_for_write(&p).unwrap_err();
+        assert_eq!(e.kind(), std::io::ErrorKind::InvalidInput);
+        assert!(e.to_string().contains("not a regular file"), "got: {e}");
+        unsafe { libc::close(rfd) };
+    }
+
+    /// The tmp file `write_record` renames from sits at a predictable path too.
+    #[cfg(unix)]
+    #[test]
+    fn a_fifo_planted_at_the_tmp_path_refuses_the_write_instead_of_blocking() {
+        let dir = tempdir();
+        let path = key_file(&dir, "fifo2");
+        mkfifo(&path.with_extension("tmp"));
+        let now = Utc::now();
+        write_record(
+            &path,
+            &Record {
+                schema_version: SCHEMA_VERSION,
+                fetched_at: now,
+                quotes: vec![q(7.0, now)],
+                backoff_until: None,
+            },
+        );
+        assert!(!path.exists(), "no record may be published through a FIFO");
+    }
+
+    /// A tmp file left behind by a crashed run is longer than the new record.
+    /// The open no longer truncates, so `set_len(0)` is what keeps the tail of
+    /// the old body out of the renamed file.
+    #[test]
+    fn a_leftover_tmp_file_does_not_leave_a_tail_in_the_new_record() {
+        let dir = tempdir();
+        let path = key_file(&dir, "leftover");
+        std::fs::write(path.with_extension("tmp"), vec![b'x'; 64 * 1024]).unwrap();
+        let now = Utc::now();
+        write_record(
+            &path,
+            &Record {
+                schema_version: SCHEMA_VERSION,
+                fetched_at: now,
+                quotes: vec![q(7.0, now)],
+                backoff_until: None,
+            },
+        );
+        let rec = read_record(&path).expect("a clean record was published");
+        assert_eq!(rec.quotes[0].price, Some(7.0));
     }
 
     #[test]

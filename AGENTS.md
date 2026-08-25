@@ -8,6 +8,7 @@
 - Format: `cargo fmt`
 
 ## Non-Obvious Rules
+- **Quickshell emits NEITHER `started` NOR `exited` when the command does not exist** — `running` just drops back to false. That is the only signal a failed start gives. Anything that waits on `onExited` to leave a loading state hangs for ever when the CLI is not installed, which is the first run of everyone who installs the plugin from the marketplace: the plugin is a git clone, the CLI is a package, and nothing installs the second for you. The `onRunningChanged` guard in the panel's `Process` is what makes the not-installed message reachable — verified against a running shell, not assumed.
 
 - **Never-crash invariant:** the binary MUST always exit 0 with valid JSON (waybar or `--output json` structured — invalid argv is pre-scanned so the fallback speaks the requested format), even on failure. No top-level `unwrap`/`expect`; `main` uses `try_parse` + `catch_unwind`. `--help`/`--version` plus the manual `--preset`/`--list-presets` helpers are the only deliberate non-JSON exits (never invoked by a bar).
 - `FINNHUB_TOKEN` is sent via the `X-Finnhub-Token` header, never in a URL — keep it out of any URL/error string/log.

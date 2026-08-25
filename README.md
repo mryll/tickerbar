@@ -68,7 +68,11 @@ cd tickerbar
 make install PREFIX=~/.local
 ```
 
-To install for all users, run `sudo make install`.
+To install for all users, run `sudo make install`. To remove tickerbar, use the same command with `uninstall`:
+
+```bash
+make uninstall PREFIX=~/.local
+```
 
 <p align="center">
   <img src="screenshots/waybar-bar.png" alt="tickerbar in Waybar" width="726">

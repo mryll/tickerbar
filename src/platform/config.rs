@@ -230,8 +230,26 @@ impl Config {
             Some(p) => p.clone(),
             None => default_config_path(),
         };
-        let body = std::fs::read_to_string(&path)
-            .map_err(|e| format!("cannot read config {}: {e}", path.display()))?;
+        // A missing file is the FIRST RUN, not a failure to report as one. It is
+        // what every new user meets, and "No such file or directory" tells them
+        // nothing they can act on — so this path says what to write and where the
+        // shipped example is. Every other io error keeps its own words.
+        let body = std::fs::read_to_string(&path).map_err(|e| {
+            if e.kind() == std::io::ErrorKind::NotFound {
+                let dir = path
+                    .parent()
+                    .map(|d| d.display().to_string())
+                    .unwrap_or_default();
+                format!(
+                    "no config yet: {}\n\nCopy the example and put your assets in it:\n  mkdir -p {}\n  cp /usr/share/tickerbar/config.example.toml {}",
+                    path.display(),
+                    dir,
+                    path.display(),
+                )
+            } else {
+                format!("cannot read config {}: {e}", path.display())
+            }
+        })?;
         Config::parse_str(&body)
     }
 }

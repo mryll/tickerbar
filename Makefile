@@ -7,6 +7,7 @@ build:
 
 install: build
 	install -Dm755 target/release/tickerbar "$(BIN)/tickerbar"
+	install -Dm644 config.example.toml "$(PREFIX)/share/tickerbar/config.example.toml"
 
 uninstall:
 	rm -f "$(BIN)/tickerbar"

@@ -7,5 +7,6 @@ pub mod market;
 pub mod model;
 pub mod presets;
 pub mod render;
+pub mod safe_read;
 pub mod theme;
 pub mod waybar;

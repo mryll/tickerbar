@@ -1,7 +1,8 @@
 use std::collections::HashMap;
 use std::env;
-use std::fs;
 use std::path::{Path, PathBuf};
+
+use crate::platform::safe_read;
 
 /// Theme colors read from Omarchy, falling back to One Dark. Reused from meteobar, with an
 /// added `red` for the "down" direction (meteobar only needed `error`).
@@ -69,7 +70,7 @@ impl ThemeColors {
         cache_home: Option<&Path>,
     ) -> Self {
         if let Some(path) = colors_file(state_home, config_home) {
-            if let Ok(content) = fs::read_to_string(&path) {
+            if let Ok(content) = safe_read::read_bounded(&path, safe_read::CONFIG_LIMIT) {
                 return Self::from_map(&parse_toml_flat(&content));
             }
         }
@@ -77,7 +78,9 @@ impl ThemeColors {
         // archived pywal, the maintained pywal16 fork, and wallust's pywal-compat target
         // all write `<cache>/wal/colors.json`.
         if let Some(root) = cache_home {
-            if let Ok(content) = fs::read_to_string(root.join("wal/colors.json")) {
+            if let Ok(content) =
+                safe_read::read_bounded(&root.join("wal/colors.json"), safe_read::CONFIG_LIMIT)
+            {
                 if let Some(colors) = Self::from_pywal(&content) {
                     return colors;
                 }
@@ -249,6 +252,7 @@ fn blend_hex(c1: &str, c2: &str, ratio: f32) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
 
     /// Tokyo Night, as current Omarchy ships it: semantic keys only, no `colorN`.
     const NAMED: &str = r##"

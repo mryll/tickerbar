@@ -234,7 +234,11 @@ impl Config {
         // what every new user meets, and "No such file or directory" tells them
         // nothing they can act on — so this path says what to write and where the
         // shipped example is. Every other io error keeps its own words.
-        let body = std::fs::read_to_string(&path).map_err(|e| {
+        let body = crate::platform::safe_read::read_bounded(
+            &path,
+            crate::platform::safe_read::CONFIG_LIMIT,
+        )
+        .map_err(|e| {
             if e.kind() == std::io::ErrorKind::NotFound {
                 let dir = path
                     .parent()

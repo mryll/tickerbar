@@ -1,6 +1,15 @@
+use std::io::Read;
 use std::time::Duration;
 
 use crate::platform::model::FetchError;
+
+/// Cap on a response body. Every byte here comes from one of six third-party
+/// APIs, and the whole document is materialized in memory before it is parsed:
+/// without a cap, one endpoint answering with a stream instead of a quote grows
+/// the omarchy-shell process it runs in until the machine gives up. The largest
+/// legitimate document any provider returns is a few tens of KiB, so 2 MiB is a
+/// wall a real answer never reaches.
+const BODY_LIMIT: u64 = 2 * 1024 * 1024;
 
 pub struct Http {
     client: reqwest::blocking::Client,
@@ -55,8 +64,7 @@ impl Http {
         if !status.is_success() {
             return Err(FetchError::Other(format!("http {status}")));
         }
-        resp.text()
-            .map_err(|e| FetchError::Other(format!("read body failed: {e}")))
+        read_body(resp)
     }
 
     /// In production, use the URL as-is. With a base set (tests), rewrite scheme+host to the
@@ -75,12 +83,45 @@ impl Http {
     }
 }
 
+/// Read a response body under `BODY_LIMIT`, refusing anything above it.
+///
+/// `Response::text` has no bound: it buffers whatever the server sends. Reading
+/// one byte PAST the limit is what distinguishes a body that exactly fits from
+/// one the cap truncated — with `take(BODY_LIMIT)` the two are identical, and a
+/// truncated document would reach serde as a parse error about nothing.
+/// Decoding is strict and comes second, for the same reason: all six providers
+/// answer JSON, which RFC 8259 requires to be UTF-8, so lossy decoding would
+/// only move a broken response's failure to a worse message downstream.
+fn read_body(resp: reqwest::blocking::Response) -> Result<String, FetchError> {
+    let mut buf: Vec<u8> = Vec::new();
+    resp.take(BODY_LIMIT + 1)
+        .read_to_end(&mut buf)
+        .map_err(|e| FetchError::Other(format!("read body failed: {e}")))?;
+    if buf.len() as u64 > BODY_LIMIT {
+        return Err(FetchError::Other(format!(
+            "response body is larger than {BODY_LIMIT} bytes"
+        )));
+    }
+    String::from_utf8(buf).map_err(|e| FetchError::Other(format!("body is not valid UTF-8: {e}")))
+}
+
 fn build_client(timeout_secs: u64) -> reqwest::blocking::Client {
     reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(timeout_secs))
+        // None of the six provider endpoints redirects legitimately, so every
+        // redirect is either a hijacked hostname or an operator mistake; the
+        // default policy would chase up to ten of them, and nothing stops the
+        // chain from stepping down to plain http on the way. Refusing turns a
+        // 3xx into an ordinary `http 3xx` failure at the first hop.
+        .redirect(reqwest::redirect::Policy::none())
         .user_agent(concat!("tickerbar/", env!("CARGO_PKG_VERSION")))
         .build()
-        .unwrap_or_else(|_| reqwest::blocking::Client::new())
+        // The former fallback here was `Client::new()`, which has NO timeout and
+        // follows redirects — precisely the client the two settings above exist
+        // to forbid, reintroduced on the one path nobody tests. `main` wraps the
+        // run in `catch_unwind` and answers with fallback JSON, so failing loudly
+        // costs a run, not the never-crash invariant.
+        .expect("blocking client with a timeout and no redirects")
 }
 
 #[cfg(test)]
@@ -131,6 +172,48 @@ mod tests {
         match http.get("/x") {
             Err(FetchError::RateLimited { retry_after }) => assert_eq!(retry_after, Some(30)),
             other => panic!("expected RateLimited, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_redirect_is_refused_at_the_first_hop_instead_of_being_followed() {
+        let mut server = mockito::Server::new();
+        let target = server
+            .mock("GET", "/moved")
+            .with_status(200)
+            .with_body("followed")
+            .expect(0)
+            .create();
+        server
+            .mock("GET", "/r")
+            .with_status(301)
+            .with_header("location", "/moved")
+            .create();
+        let http = Http::with_base_url(&server.url(), 2);
+        match http.get("/r") {
+            Err(FetchError::Other(m)) => assert!(m.contains("301"), "got: {m}"),
+            other => panic!("expected the 301 itself, got {other:?}"),
+        }
+        target.assert();
+    }
+
+    #[test]
+    fn an_oversize_body_is_refused_by_size_instead_of_parsed() {
+        let mut server = mockito::Server::new();
+        server
+            .mock("GET", "/big")
+            .with_status(200)
+            .with_body(vec![b'x'; (BODY_LIMIT + 16) as usize])
+            .create();
+        let http = Http::with_base_url(&server.url(), 30);
+        match http.get("/big") {
+            Err(FetchError::Other(m)) => {
+                assert!(
+                    m.contains(&format!("larger than {BODY_LIMIT} bytes")),
+                    "got: {m}"
+                )
+            }
+            other => panic!("expected an oversize error, got {other:?}"),
         }
     }
 

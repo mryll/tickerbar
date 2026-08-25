@@ -8,6 +8,7 @@ use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 
 use crate::platform::model::{FetchError, Quote, QuoteState};
+use crate::platform::safe_read;
 
 pub const SCHEMA_VERSION: u32 = 2;
 
@@ -67,7 +68,7 @@ pub fn key_file(dir: &Path, key: &str) -> PathBuf {
 }
 
 fn read_record(path: &Path) -> Option<Record> {
-    let body = fs::read_to_string(path).ok()?;
+    let body = safe_read::read_bounded(path, safe_read::STATE_LIMIT).ok()?;
     let rec: Record = serde_json::from_str(&body).ok()?;
     if rec.schema_version != SCHEMA_VERSION {
         return None;

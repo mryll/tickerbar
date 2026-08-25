@@ -717,8 +717,21 @@ Panel {
     }
     stdout: StdioCollector {
       waitForEnd: true
+      // A tripwire, not a limit. StdioCollector has already buffered the whole
+      // stream by the time this runs, so this cannot cap the peak memory — the
+      // real bound is in the CLI, which reads every file and every response
+      // under a byte cap of its own. What this does is refuse to RETAIN an
+      // answer that is far outside anything the CLI can legitimately produce,
+      // and say so, instead of parsing megabytes of unknown text into the
+      // long-lived shell process.
+      readonly property int maxBytes: 1024 * 1024
       onStreamFinished: {
-        root.capturedText = text
+        if (text.length > maxBytes) {
+          root.capturedText = ""
+          root.setError(root.binName + " returned more than " + (maxBytes / 1024) + " KiB — refusing it")
+        } else {
+          root.capturedText = text
+        }
         root.collectorDone = true
         root.maybeFinalize()
       }

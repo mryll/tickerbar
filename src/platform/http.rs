@@ -129,6 +129,20 @@ mod tests {
     use super::*;
     use crate::platform::model::FetchError;
 
+    /// The cap, written out by hand. Reading `BODY_LIMIT` here would move the
+    /// expectation with the code, so raising the cap could never turn a test
+    /// red: the body would grow with it and the message would still match.
+    /// Changing a safety limit has to cost editing this number on purpose.
+    const DOCUMENTED_BODY_LIMIT: u64 = 2 * 1024 * 1024;
+
+    #[test]
+    fn the_body_cap_is_still_the_two_mebibytes_the_module_documents() {
+        assert_eq!(
+            BODY_LIMIT, DOCUMENTED_BODY_LIMIT,
+            "the response body cap changed; update the doc comment and this number together"
+        );
+    }
+
     #[test]
     fn a_200_response_returns_the_body() {
         let mut server = mockito::Server::new();
@@ -203,15 +217,12 @@ mod tests {
         server
             .mock("GET", "/big")
             .with_status(200)
-            .with_body(vec![b'x'; (BODY_LIMIT + 16) as usize])
+            .with_body(vec![b'x'; (DOCUMENTED_BODY_LIMIT + 16) as usize])
             .create();
         let http = Http::with_base_url(&server.url(), 30);
         match http.get("/big") {
             Err(FetchError::Other(m)) => {
-                assert!(
-                    m.contains(&format!("larger than {BODY_LIMIT} bytes")),
-                    "got: {m}"
-                )
+                assert!(m.contains("larger than 2097152 bytes"), "got: {m}")
             }
             other => panic!("expected an oversize error, got {other:?}"),
         }

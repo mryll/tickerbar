@@ -54,10 +54,22 @@ A long watchlist wraps into side-by-side columns and into bands below:
 
 ## Installation
 
+### Omarchy
+
+On [Omarchy](https://omarchy.org), the complete installation is two commands, plus the watchlist:
+
+```bash
+yay -S tickerbar-bin
+omarchy plugin add https://github.com/mryll/tickerbar.git --enable
+```
+
+The first command installs the prebuilt binary. The second command installs the bar widget and enables it. Then create your watchlist — refer to [Quick start](#quick-start). For the panel and its settings, refer to [Omarchy shell plugin](#omarchy-shell-plugin).
+
 ### Arch Linux (AUR)
 
 ```bash
-yay -S tickerbar
+yay -S tickerbar        # builds from source
+yay -S tickerbar-bin    # prebuilt binary
 ```
 
 ### From source

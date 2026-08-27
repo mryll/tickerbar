@@ -9,6 +9,10 @@ fn a_run_is_marked_not_installed_only_without_an_exit_signal() {
     assert!(PANEL.contains("root.sawExit = true"), "onExited must set sawExit");
     assert!(PANEL.contains("} else if (!sawExit) {"), "gate on !sawExit");
     assert!(
+        PANEL.contains("tripwireFired = false") && PANEL.contains("if (tripwireFired) {"),
+        "the empty branch gates on the per-run tripwire flag, not stale text"
+    );
+    assert!(
         PANEL.contains("produced no output (exit "),
         "a run that exited empty is an operational error"
     );

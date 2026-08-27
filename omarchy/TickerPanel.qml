@@ -611,6 +611,10 @@ Panel {
   property int exitCode: 0
   property var pendingCmd: null
 
+  // True when this run's collector refused oversize output. Its message
+  // must survive finalizeRun; a stale error from a previous run must not.
+  property bool tripwireFired: false
+
   // True when onExited fired for the current run. A missing command emits
   // no exited. This separates "could not start" from "ran, no output".
   property bool sawExit: false
@@ -641,6 +645,7 @@ Panel {
     processDone = false
     capturedText = ""
     sawExit = false
+    tripwireFired = false
     exitCode = 0
     statusProc.command = cmd
     statusProc.running = true
@@ -673,8 +678,8 @@ Panel {
       // error: keep it. (2) No exited = failed start: report not-installed.
       // (3) The process ran and printed nothing: an operational error,
       // never "not installed".
-      if (root.runError !== "") {
-        // Already explained (tripwire).
+      if (tripwireFired) {
+        // Already explained by this run's tripwire.
       } else if (!sawExit) {
         notInstalled = true
         setError(binName + " could not start — not installed or not on PATH?\n\n"
@@ -761,6 +766,7 @@ Panel {
       readonly property int maxChars: 1024 * 1024
       onStreamFinished: {
         if (text.length > maxChars) {
+          root.tripwireFired = true
           root.capturedText = ""
           root.setError(root.binName + " returned more than " + (maxChars / 1024) + "K characters — refusing it")
         } else {

@@ -139,7 +139,7 @@ tooltip_max_columns = 0
 tooltip_range = false
 # The family the tooltip is pinned to — a Pango family list, tried in order.
 # It must be monospace. Refer to "Tooltip font".
-tooltip_font = "JetBrainsMono Nerd Font Mono, JetBrainsMono Nerd Font, monospace"
+tooltip_font = "JetBrainsMono Nerd Font, JetBrainsMono Nerd Font Mono, monospace"
 ```
 
 | Key | Default | What it does |
@@ -155,7 +155,7 @@ tooltip_font = "JetBrainsMono Nerd Font Mono, JetBrainsMono Nerd Font, monospace
 | `tooltip_rows_per_column` | `0` | Start a new column after N lines. `0` means one column. |
 | `tooltip_max_columns` | `0` | The most columns side by side. Extra columns move to a band below. `0` means no limit. |
 | `tooltip_range` | `false` | Add the low-high range of the day to each row. |
-| `tooltip_font` | `JetBrainsMono Nerd Font Mono, JetBrainsMono Nerd Font, monospace` | The family the tooltip is pinned to. It must be monospace — refer to [Tooltip font](#tooltip-font). |
+| `tooltip_font` | `JetBrainsMono Nerd Font, JetBrainsMono Nerd Font Mono, monospace` | The family the tooltip is pinned to. It must be monospace — refer to [Tooltip font](#tooltip-font). |
 | `frame`, `frame_font` | — | **DEPRECATED**, still accepted. `frame` drew a bordered card and is now a no-op; `frame_font` is an alias for `tooltip_font`. |
 
 > [!NOTE]
@@ -362,10 +362,10 @@ The default is a **list** of families, tried in order:
 
 ```toml
 [display]
-tooltip_font = "JetBrainsMono Nerd Font Mono, JetBrainsMono Nerd Font, monospace"
+tooltip_font = "JetBrainsMono Nerd Font, JetBrainsMono Nerd Font Mono, monospace"
 ```
 
-Pango falls through to the next name when one is not installed. This matters: the Arch package `ttf-jetbrains-mono-nerd` does **not** ship the `…Mono` family, so pinning that one name alone used to fall back to your system's proportional font without saying so.
+Pango falls through to the next name when one is not installed. Both families are fully monospaced — every glyph, icons included, advances 0.6 em — so the rules align the same with either. The difference is the drawn size of the icons: the `…Mono` family shrinks them to fit the cell, about 40% smaller. The non-Mono family draws them at full size, and for that reason it comes first. The Arch package `ttf-jetbrains-mono-nerd` ships both families; `ttf-jetbrains-mono-nerd-basic` — the one Omarchy installs — ships only the non-Mono one.
 
 > [!NOTE]
 > **`frame` and `frame_font` are deprecated.** `frame` drew the tooltip as a bordered card. It is still accepted, so an existing config keeps loading, but it now does nothing; `frame_font` is an alias for `tooltip_font`.

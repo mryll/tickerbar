@@ -1013,7 +1013,7 @@ mod tests {
             tooltip_max_columns: 0,
             tooltip_range: false,
             frame: false,
-            tooltip_font: "JetBrainsMono Nerd Font Mono, JetBrainsMono Nerd Font, monospace".into(),
+            tooltip_font: "JetBrainsMono Nerd Font, JetBrainsMono Nerd Font Mono, monospace".into(),
         }
     }
 

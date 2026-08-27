@@ -87,7 +87,7 @@ fn default_bar_layout() -> String {
     "{summary}   {bar}".into()
 }
 fn default_tooltip_font() -> String {
-    "JetBrainsMono Nerd Font Mono, JetBrainsMono Nerd Font, monospace".into()
+    "JetBrainsMono Nerd Font, JetBrainsMono Nerd Font Mono, monospace".into()
 }
 
 impl Display {

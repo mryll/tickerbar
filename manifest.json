@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "mryll.tickerbar",
   "name": "Tickerbar",
-  "version": "1.0.0",
+  "version": "0.6.2",
   "author": "mryll",
   "license": "MIT",
   "description": "Multi-market price ticker (crypto, stocks, indices, commodities, forex, rates) in the Omarchy bar.",

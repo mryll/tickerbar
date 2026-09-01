@@ -1,6 +1,6 @@
 [package]
 name = "tickerbar"
-version = "0.7.1"
+version = "0.7.2"
 edition = "2021"
 description = "A multi-market price ticker for Waybar (crypto, stocks, indices, commodities, forex, rates) — no API key"
 license = "MIT"

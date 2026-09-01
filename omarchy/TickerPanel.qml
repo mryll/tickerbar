@@ -647,7 +647,12 @@ Panel {
     sawExit = false
     tripwireFired = false
     exitCode = 0
-    statusProc.command = cmd
+    // Through sh, never direct: handing Quickshell 0.3.1 a nonexistent binary
+    // can abort the whole shell inside the failed start (claudebar#6) — before
+    // any QML signal fires. sh always starts; a failed exec is sh exiting 127
+    // (not found) or 126 (not executable), which finalizeRun maps to the
+    // failed-start path. "$0"/"$@" keep everything as argv elements.
+    statusProc.command = ["/bin/sh", "-c", 'exec "$0" "$@"'].concat(cmd)
     statusProc.running = true
   }
 
@@ -678,9 +683,12 @@ Panel {
       // error: keep it. (2) No exited = failed start: report not-installed.
       // (3) The process ran and printed nothing: an operational error,
       // never "not installed".
+      // A failed start is now sh exiting 126/127 (the exec failed; sh's
+      // message goes to stderr, so stdout stays empty). !sawExit stays as
+      // the belt for a start that emits no exited.
       if (tripwireFired) {
         // Already explained by this run's tripwire.
-      } else if (!sawExit) {
+      } else if (!sawExit || exitCode === 126 || exitCode === 127) {
         notInstalled = true
         setError(binName + " could not start — not installed or not on PATH?\n\n"
                  + "Install it with:  " + installCmd + "\n"

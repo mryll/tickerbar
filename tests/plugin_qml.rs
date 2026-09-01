@@ -7,7 +7,18 @@ static PANEL: &str = include_str!("../omarchy/TickerPanel.qml");
 fn a_run_is_marked_not_installed_only_without_an_exit_signal() {
     assert!(PANEL.contains("sawExit = false"), "startRun must reset sawExit");
     assert!(PANEL.contains("root.sawExit = true"), "onExited must set sawExit");
-    assert!(PANEL.contains("} else if (!sawExit) {"), "gate on !sawExit");
+    assert!(
+        PANEL.contains("} else if (!sawExit || exitCode === 126 || exitCode === 127) {"),
+        "gate on !sawExit or sh's exec-failure codes"
+    );
+    assert!(
+        PANEL.contains(r#"["/bin/sh", "-c", 'exec "$0" "$@"'].concat(cmd)"#),
+        "the command must be wrapped in sh (claudebar#6: a missing binary can abort the shell)"
+    );
+    assert!(
+        !PANEL.contains("command = cmd"),
+        "the direct (unwrapped) command assignment is banned"
+    );
     assert!(
         PANEL.contains("tripwireFired = false") && PANEL.contains("if (tripwireFired) {"),
         "the empty branch gates on the per-run tripwire flag, not stale text"

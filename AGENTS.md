@@ -8,7 +8,7 @@
 - Format: `cargo fmt`
 
 ## Non-Obvious Rules
-- **Quickshell emits NEITHER `started` NOR `exited` when the command does not exist** — `running` just drops back to false. `sawExit` is the discriminator: no `exited` = the run could not start; an `exited` run with empty output is an operational failure, never "not installed".
+- **The CLI always runs through `/bin/sh -c 'exec "$0" "$@"'`, never direct.** A nonexistent binary handed to Quickshell 0.3.1 can abort the whole shell inside the failed start (claudebar#6), before any QML signal fires. The failed-start discriminator is `!sawExit || exitCode === 126 || exitCode === 127` on empty output; any other exited-empty run is an operational failure, never "not installed".
 - **`installCmd` is the one constant** — the message shows it and the button copies it (`Util.execArgv(["wl-copy", ...])`, no shell line, no trailing newline). The button gates on `notInstalled`, never on `topError` (which also carries CLI errors). Pinned in `tests/plugin_qml.rs`.
 
 - **Never-crash invariant:** the binary MUST always exit 0 with valid JSON (waybar or `--output json` structured — invalid argv is pre-scanned so the fallback speaks the requested format), even on failure. No top-level `unwrap`/`expect`; `main` uses `try_parse` + `catch_unwind`. `--help`/`--version` plus the manual `--preset`/`--list-presets` helpers are the only deliberate non-JSON exits (never invoked by a bar).
@@ -28,11 +28,3 @@
 - Caching lives only in `platform::cache::get_or_fetch(key, ttl, now, fetch_fn)`; slices never cache. Test error/backoff paths by faking the `fetch_fn` closure; test provider HTTP wiring with `mockito` via `Http::with_base_url`; test parsers with fixtures in `tests/fixtures/`.
 - Tests follow behavior-focused names (no method names); see existing `#[test]` fns.
 
-## Release
-
-A release is automated by pushing a tag — do NOT build or upload the binary by hand:
-
-1. Merge the work into `master`. In the release commit (`chore: release X.Y.Z`): bump `version` in `Cargo.toml` + `Cargo.lock` AND in `manifest.json` (the marketplace shows the manifest's version; it must equal the tag). Push.
-2. `git tag vX.Y.Z && git push origin --tags`.
-3. The tag push triggers `.github/workflows/release.yml`, which builds and publishes the GitHub release with the asset `tickerbar-X.Y.Z-x86_64-linux` (consumed by the `tickerbar-bin` AUR package).
-4. Only after the release exists, bump both AUR repos (`aur/tickerbar` source + `aur/tickerbar-bin`) per the workspace `AGENTS.md`. Order matters: `updpkgsums` fetches the tag tarball AND the release asset, so both must already be live.

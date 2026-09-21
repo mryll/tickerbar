@@ -557,9 +557,11 @@ Panel {
     })
   }
 
+  // Hide first: if the bar API ever rejects the setter again, the panel
+  // still closes instead of stranding a full-screen overlay (tickerbar#1).
   function close() {
-    setCenterHoverRevealSuppressed(false)
     root.controller.hide()
+    setCenterHoverRevealSuppressed(false)
   }
 
   function toggle() {
@@ -588,9 +590,22 @@ Panel {
     return false
   }
 
+  // Since omarchy 1702cf0 (2026-09-01) third-party widgets get a
+  // PluginBarApi facade whose `centerHoverRevealSuppressed` is read-only;
+  // the supported path is its setter. The assignment stays as a fallback
+  // for older hosts that inject the real Bar. Either way a throw here must
+  // not escape: close() calls this on every dismissal, openFromHotkey() on
+  // every hotkey open.
   function setCenterHoverRevealSuppressed(value) {
-    if (root.bar && "centerHoverRevealSuppressed" in root.bar)
-      root.bar.centerHoverRevealSuppressed = value
+    if (!root.bar) return
+    try {
+      if (typeof root.bar.setCenterHoverRevealSuppressed === "function")
+        root.bar.setCenterHoverRevealSuppressed(value)
+      else if ("centerHoverRevealSuppressed" in root.bar)
+        root.bar.centerHoverRevealSuppressed = value
+    } catch (e) {
+      console.warn("setCenterHoverRevealSuppressed:", e)
+    }
   }
 
   // ---- Data flow: poll the CLI, parse, keep last-known-good on any failure,

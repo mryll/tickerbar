@@ -46,3 +46,58 @@ fn the_install_command_is_one_constant_copied_as_argv() {
         "the button gates on notInstalled — topError also carries CLI errors"
     );
 }
+
+// tickerbar#1: since omarchy 1702cf0 the host injects a PluginBarApi facade
+// whose `centerHoverRevealSuppressed` is read-only. Assigning it throws, and
+// a throw inside close() before hide() strands a full-screen overlay.
+#[test]
+fn the_panel_hides_before_touching_the_bar_hover_state() {
+    let close = PANEL
+        .split("function close() {")
+        .nth(1)
+        .expect("close() must exist")
+        .split('}')
+        .next()
+        .unwrap();
+    let hide = close
+        .find("root.controller.hide()")
+        .expect("close() must hide");
+    let setter = close
+        .find("setCenterHoverRevealSuppressed(false)")
+        .expect("close() must release the hover suppression");
+    assert!(hide < setter, "hide() must run before the bar setter");
+}
+
+#[test]
+fn the_hover_suppression_goes_through_the_plugin_bar_api_setter() {
+    assert!(
+        PANEL.contains(r#"typeof root.bar.setCenterHoverRevealSuppressed === "function""#),
+        "must prefer PluginBarApi.setCenterHoverRevealSuppressed()"
+    );
+    // Only the setter body: the panel has other try blocks further down.
+    let setter_fn = PANEL
+        .split("function setCenterHoverRevealSuppressed(value) {")
+        .nth(1)
+        .expect("setter must exist")
+        .split("\n  }\n")
+        .next()
+        .unwrap();
+    let call = setter_fn
+        .find("root.bar.setCenterHoverRevealSuppressed(value)")
+        .expect("the setter must call the PluginBarApi function");
+    let assign = setter_fn
+        .find("root.bar.centerHoverRevealSuppressed = value")
+        .expect("the setter must keep the assignment for hosts that inject the real Bar");
+    assert!(
+        call < assign,
+        "the function call comes first, the assignment is the fallback"
+    );
+    assert!(
+        setter_fn.contains("try {") && setter_fn.contains("} catch (e) {"),
+        "a throw from the host API must not escape"
+    );
+    assert!(
+        !setter_fn.contains("throw"),
+        "the catch must swallow, not rethrow"
+    );
+}

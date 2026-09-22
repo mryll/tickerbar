@@ -71,72 +71,41 @@ BarWidget {
   //      this widget, then drop entries from the END (config `display.bar`
   //      order is priority order) down to the glyph as the floor.
   //
-  //      Geometry sources, all verified against Bar.qml: `bar.moduleSlots`
-  //      (every ModuleSlot registers; slot.width tracks its widget), slot
-  //      `region` left|center|right, `bar.slotWindow`/`bar.sameWindow` to
-  //      scope sums to THIS monitor's bar, and `bar.centerAnchor` +
-  //      `bar.layoutEntries`/`bar.entryId` to model the anchored-center
-  //      layout, where the strip lives in a flank beside the pinned module
-  //      (a plain centered model would under-constrain that case).
+  //      An earlier version of this sized itself against `bar.moduleSlots` /
+  //      `bar.slotWindow` / `bar.sameWindow` / `bar.centerAnchor` /
+  //      `bar.layoutEntries` / `bar.entryId` to precisely bound itself
+  //      against its actual neighbors. None of that exists on the object a
+  //      third-party widget is actually handed (`root.bar` is a
+  //      `PluginBarApi` instance — see Ui/PluginBarApi.qml — which exposes
+  //      only scalar bar state and a few scoped callbacks, deliberately not
+  //      host-Bar internals). So that geometry read silently failed its own
+  //      guard on every evaluation and fell through to "no geometry yet:
+  //      render fully" — i.e. the strip never self-limited at all, which is
+  //      how it ended up painted straight over the clock. There is no way
+  //      for a plugin to see sibling widget widths in this API, so the best
+  //      available fix is a conservative fixed fraction of the window width.
   readonly property real stripMaxWidth: {
     if (!root.bar || root.vertical) return -1
     var win = root.QsWindow.window
     if (!win || !(win.width > 0)) return -1
-    var barHost = root.bar
-    if (typeof barHost.slotWindow !== "function" || typeof barHost.sameWindow !== "function") return -1
-    var slots = barHost.moduleSlots || []
     var W = win.width
     var margin = Style.space(8)   // the bar's left/right section edge margins
     var safety = Style.space(12)  // breathing gap kept before a neighbor section
 
-    // Where does this widget sit relative to the center anchor (if any)?
-    var entriesList = typeof barHost.layoutEntries === "function" ? barHost.layoutEntries("center") : []
-    var anchorName = String(barHost.centerAnchor || "")
-    var anchorIdx = -1
-    var myIdx = -1
-    for (var e = 0; e < entriesList.length; e++) {
-      var id = typeof barHost.entryId === "function" ? String(barHost.entryId(entriesList[e])) : ""
-      if (id === anchorName) anchorIdx = e
-      if (id === root.moduleName) myIdx = e
-    }
-    var anchored = anchorIdx !== -1 && myIdx !== -1
-
-    var left = 0
-    var right = 0
-    var centerOther = 0
-    var anchorW = 0
-    var flankOther = 0
-    for (var i = 0; i < slots.length; i++) {
-      var s = slots[i]
-      if (!s || s.activeItem === root) continue // exclude self: no feedback loop
-      if (!barHost.sameWindow(barHost.slotWindow(s), win)) continue
-      var w = s.width || 0
-      if (s.region === "left") left += w
-      else if (s.region === "right") right += w
-      else if (s.region === "center") {
-        if (!anchored) { centerOther += w; continue }
-        var idx = typeof barHost.entryIndex === "function"
-          ? barHost.entryIndex(entriesList, String(s.moduleName)) : -1
-        if (idx === anchorIdx) anchorW = w
-        else if (myIdx > anchorIdx && idx > anchorIdx) flankOther += w  // shares my flank
-        else if (myIdx < anchorIdx && idx !== -1 && idx < anchorIdx) flankOther += w
-      }
-    }
-
-    var available
-    if (anchored && myIdx > anchorIdx) {
-      // After-anchor flank: grows rightward from the pinned module's edge.
-      available = W / 2 - anchorW / 2 - (right + margin) - flankOther - safety
-    } else if (anchored && myIdx < anchorIdx) {
-      // Before-anchor flank: grows leftward, bounded by the left section.
-      available = W / 2 - anchorW / 2 - (left + margin) - flankOther - safety
-    } else if (anchored) {
-      // This widget IS the anchor: centered, bounded by the nearer section.
-      available = W - 2 * (Math.max(left, right) + margin) - safety
-    } else {
-      // Plain centered center-section.
-      available = W - 2 * (Math.max(left, right) + margin) - centerOther - safety
-    }
+    // PluginBarApi (the facade a third-party widget actually receives — see
+    // Ui/PluginBarApi.qml) exposes NONE of moduleSlots/slotWindow/sameWindow/
+    // layoutEntries/entryIndex/entryId/centerAnchor: those are host-internal
+    // Bar.qml fields, deliberately not part of the plugin-facing surface
+    // ("the facade avoids direct host-Bar injection"). So there is no way
+    // for this widget to see sibling widths or where the center block sits.
+    // The only real signal available is the window width itself. Cap to a
+    // conservative fraction of it so the strip always self-limits instead
+    // of rendering every entry at full width straight through the clock —
+    // which is what an unconditional "no geometry yet" bailout used to do
+    // on every single evaluation (the previous version of this code assumed
+    // bar.slotWindow/sameWindow existed and silently short-circuited here).
+    var conservativeFraction = 0.30
+    var available = W * conservativeFraction - margin - safety
     return Math.max(0, available)
   }
 

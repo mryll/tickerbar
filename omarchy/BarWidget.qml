@@ -71,19 +71,73 @@ BarWidget {
   //      this widget, then drop entries from the END (config `display.bar`
   //      order is priority order) down to the glyph as the floor.
   //
-  //      An earlier version of this sized itself against `bar.moduleSlots` /
-  //      `bar.slotWindow` / `bar.sameWindow` / `bar.centerAnchor` /
-  //      `bar.layoutEntries` / `bar.entryId` to precisely bound itself
-  //      against its actual neighbors. None of that exists on the object a
-  //      third-party widget is actually handed (`root.bar` is a
-  //      `PluginBarApi` instance — see Ui/PluginBarApi.qml — which exposes
-  //      only scalar bar state and a few scoped callbacks, deliberately not
-  //      host-Bar internals). So that geometry read silently failed its own
-  //      guard on every evaluation and fell through to "no geometry yet:
-  //      render fully" — i.e. the strip never self-limited at all, which is
-  //      how it ended up painted straight over the clock. There is no way
-  //      for a plugin to see sibling widget widths in this API, so the best
-  //      available fix is a conservative fixed fraction of the window width.
+  //      Where the geometry comes from. Since omarchy 1702cf0 a third-party
+  //      widget receives a PluginBarApi facade as `bar` (shell/Ui/
+  //      PluginBarApi.qml), not the Bar: it has no moduleSlots, slotWindow,
+  //      centerAnchor or layoutEntries, and its `moduleWidgets(id)` answers
+  //      only for this widget's own id (Bar.pluginBarApiFor wires it that
+  //      way). An earlier version read those Bar internals through `bar`, so
+  //      its guard failed on every evaluation and the strip never
+  //      self-limited (PR #2's diagnosis). The neighbors are still visible,
+  //      though: this widget is a visual child of the bar window's item
+  //      tree, and the bar puts every module in a slot Item that declares
+  //      `region` ("left"|"center"|"right") and `moduleName`. So walk THIS
+  //      window's tree (the bar builds one tree per monitor, which scopes
+  //      multi-monitor for free), collect those slots and model the layout
+  //      from their widths and positions — the same model Bar.qml lays out:
+  //      left/right sections at the edges, the center block either centered
+  //      as one row or split in two flanks around a pinned centerAnchor.
+  //
+  //      Loop safety: nothing here reads this widget's own slot width, and
+  //      the positions it reads either do not follow our width (the anchor,
+  //      the outer sections) or only decide a side that cannot change.
+  //      When the tree does not look like that, fall back to a fraction of
+  //      the window (`stripMaxPercent`), so the failure mode is "capped a bit
+  //      blindly", never "painted over the clock".
+  readonly property real stripMaxFraction: {
+    var v = Number(root.settings ? root.settings.stripMaxPercent : undefined)
+    return v >= 10 && v <= 90 ? v / 100 : 0.30
+  }
+
+  // The bar's slot contract: the ancestor that hosts this widget, and the
+  // items the tree walk counts as neighbors.
+  function isModuleSlot(item) {
+    return !!item && typeof item.region === "string" && typeof item.moduleName === "string"
+  }
+
+  function hostSlot() {
+    var n = root.parent
+    for (var depth = 0; n && depth < 6; depth++) {
+      if (isModuleSlot(n)) return n
+      n = n.parent
+    }
+    return null
+  }
+
+  // Every module slot under `item`. Slots do not nest, so the walk stops at
+  // each one (a widget's own panel or loader children are never visited).
+  // Reading `children` on the way down makes the binding follow rebuilds.
+  function collectSlots(item, out, budget) {
+    if (!item || budget.n-- <= 0) return
+    if (isModuleSlot(item)) { out.push(item); return }
+    var kids = item.children
+    for (var i = 0; i < kids.length; i++) collectSlots(kids[i], out, budget)
+  }
+
+  // x of `item`'s left edge in `top`'s coordinates, summed by hand rather
+  // than mapToItem so each `x` on the way is a binding dependency.
+  function leftIn(item, top) {
+    var x = 0
+    for (var n = item; n && n !== top; n = n.parent) x += n.x
+    return x
+  }
+
+  function sumWidths(slots) {
+    var total = 0
+    for (var i = 0; i < slots.length; i++) total += slots[i].width
+    return total
+  }
+
   readonly property real stripMaxWidth: {
     if (!root.bar || root.vertical) return -1
     var win = root.QsWindow.window
@@ -91,22 +145,92 @@ BarWidget {
     var W = win.width
     var margin = Style.space(8)   // the bar's left/right section edge margins
     var safety = Style.space(12)  // breathing gap kept before a neighbor section
+    var blind = Math.max(0, W * root.stripMaxFraction - margin - safety)
 
-    // PluginBarApi (the facade a third-party widget actually receives — see
-    // Ui/PluginBarApi.qml) exposes NONE of moduleSlots/slotWindow/sameWindow/
-    // layoutEntries/entryIndex/entryId/centerAnchor: those are host-internal
-    // Bar.qml fields, deliberately not part of the plugin-facing surface
-    // ("the facade avoids direct host-Bar injection"). So there is no way
-    // for this widget to see sibling widths or where the center block sits.
-    // The only real signal available is the window width itself. Cap to a
-    // conservative fraction of it so the strip always self-limits instead
-    // of rendering every entry at full width straight through the clock —
-    // which is what an unconditional "no geometry yet" bailout used to do
-    // on every single evaluation (the previous version of this code assumed
-    // bar.slotWindow/sameWindow existed and silently short-circuited here).
-    var conservativeFraction = 0.30
-    var available = W * conservativeFraction - margin - safety
-    return Math.max(0, available)
+    var mine = hostSlot()
+    if (!mine) return blind
+    var top = mine
+    while (top.parent) top = top.parent
+    var all = []
+    collectSlots(top, all, { n: 4000 })
+
+    // Structure is read from every slot, hidden ones included (a configured
+    // anchor whose widget is hidden still splits the center in flanks pinned
+    // to the middle); only the measured sums skip what is not on screen. The
+    // bar always builds the anchor slot, with an empty moduleName when no
+    // anchor is configured: that one is not structure.
+    var left = [], center = [], right = []
+    var oneRow = true
+    for (var i = 0; i < all.length; i++) {
+      var s = all[i]
+      if (s === mine || s.moduleName === "") continue
+      if (s.region === "center" && s.parent !== mine.parent) oneRow = false
+      if (!s.visible || !(s.width > 0)) continue
+      if (s.region === "left") left.push(s)
+      else if (s.region === "right") right.push(s)
+      else if (s.region === "center") center.push(s)
+    }
+
+    // Inner edges of the outer sections, measured; the bar margin when empty.
+    var half = W / 2
+    var leftBound = margin
+    var rightBound = W - margin
+    var k
+    if (mine.region !== "left")
+      for (k = 0; k < left.length; k++) leftBound = Math.max(leftBound, leftIn(left[k], top) + left[k].width)
+    if (mine.region !== "right")
+      for (k = 0; k < right.length; k++) rightBound = Math.min(rightBound, leftIn(right[k], top))
+
+    if (mine.region === "left") {
+      // Grows rightward from the bar edge, up to the center block (or the
+      // right section when there is no center block).
+      var bound = rightBound
+      for (k = 0; k < center.length; k++) bound = Math.min(bound, leftIn(center[k], top))
+      return Math.max(0, bound - margin - sumWidths(left) - safety)
+    }
+    if (mine.region === "right") {
+      var edge = leftBound
+      for (k = 0; k < center.length; k++) edge = Math.max(edge, leftIn(center[k], top) + center[k].width)
+      return Math.max(0, W - margin - sumWidths(right) - edge - safety)
+    }
+    if (mine.region !== "center") return blind
+
+    if (oneRow) {
+      // One block centered on the bar (the plain center row, or this widget
+      // alone): symmetric about the middle, bounded by the nearer section.
+      return Math.max(0, 2 * Math.min(half - leftBound, rightBound - half) - sumWidths(center) - safety)
+    }
+
+    // Anchored center: the pinned module straddles the middle and the flanks
+    // grow outward from its edges. Which flank we are on is read from our
+    // position against the anchor's middle; that side never changes with
+    // our width.
+    var anchor = null
+    for (k = 0; k < center.length; k++) {
+      var l = leftIn(center[k], top)
+      if (l <= half && l + center[k].width >= half) anchor = center[k]
+    }
+    var aLeft = anchor ? leftIn(anchor, top) : half
+    var aRight = anchor ? aLeft + anchor.width : half
+    var aMid = (aLeft + aRight) / 2
+    var before = 0
+    var after = 0
+    for (k = 0; k < center.length; k++) {
+      if (center[k] === anchor) continue
+      var mid = leftIn(center[k], top) + center[k].width / 2
+      if (mid >= aMid) after += center[k].width
+      else before += center[k].width
+    }
+    if (!anchor) {
+      // Nothing else straddles the middle: this widget IS the anchor (it is
+      // centered, so it could take twice the tighter side) or the anchor is
+      // hidden and we are a flank starting at the middle. The tighter side,
+      // once, is under both.
+      return Math.max(0, Math.min(half - leftBound - before, rightBound - half - after) - safety)
+    }
+    return leftIn(mine, top) >= aMid
+      ? Math.max(0, rightBound - aRight - after - safety)
+      : Math.max(0, aLeft - leftBound - before - safety)
   }
 
   // Measure entries with the same font the strip renders in.

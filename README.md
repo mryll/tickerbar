@@ -438,6 +438,7 @@ Change these settings in the settings window of the shell, or write them in the 
 | `configPath` | string | `""` | Another config file. An empty value means `~/.config/tickerbar/config.toml`. |
 | `summaryMode` | enum | `follow` | The watchlist average on the bar. `follow` obeys `summary_format`. `show` and `hide` force it. |
 | `colorMode` | enum | `full` | Direction tint: `full`, `none`, `bar-only` (color on the strip only), `panel-only` (the opposite). This is equal to `--no-color` in the CLI. |
+| `stripMaxPercent` | integer | `30` | Fallback cap for the bar strip, as a percentage of the bar width (10 to 90). The strip measures its neighbors on each monitor's bar and drops entries from the end until it fits its flank; this cap applies only when the bar's layout cannot be read. |
 
 <p align="center">
   <img src="screenshots/omarchy-panel-mono.png" alt="Omarchy panel with colorMode set to none" width="790">

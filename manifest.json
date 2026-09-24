@@ -22,7 +22,8 @@
       "refreshIntervalSec": 60,
       "configPath": "",
       "summaryMode": "follow",
-      "colorMode": "full"
+      "colorMode": "full",
+      "stripMaxPercent": 30
     },
     "schema": [
       {
@@ -66,6 +67,16 @@
         ],
         "defaultValue": "full",
         "description": "Monochrome rendering uses foreground tones only — severity stays readable through the numbers and glyphs. none: no color anywhere. bar-only: colored bar face, plain panel. panel-only: the reverse."
+      },
+      {
+        "key": "stripMaxPercent",
+        "type": "integer",
+        "label": "Strip width cap when the bar cannot be measured (% of the bar)",
+        "description": "Normally the strip measures its neighbors on this monitor's bar and drops entries from the end until it fits its flank. When the bar's layout cannot be read (a shell whose bar is built differently), it caps itself at this share of the bar width instead.",
+        "min": 10,
+        "max": 90,
+        "step": 5,
+        "defaultValue": 30
       }
     ]
   }

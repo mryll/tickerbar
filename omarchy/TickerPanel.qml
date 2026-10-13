@@ -3,6 +3,7 @@ import QtQuick
 import QtQuick.Layouts
 import Quickshell.Io
 import qs.Commons
+import qs.Commons as Commons
 import qs.Ui
 
 // Market table popup + data owner. This panel runs `tickerbar --output json`
@@ -36,7 +37,7 @@ Panel {
   // reference for a card, and a theme that defines popups.text separately would
   // be ignored outright. (printbar already did this; the rest of the family now
   // agrees.)
-  readonly property color panelFg: Color.popups.text
+  readonly property color panelFg: Commons.Color.popups.text
   readonly property color mutedFg: Qt.darker(panelFg, 1.55)
 
   // ---- Freshness suffix tint, shared by the whole family. The timestamp is
@@ -44,7 +45,7 @@ Panel {
   // "· stale" / "· partial data" suffix carries a muted warning tone.
   readonly property color freshnessWarn: panelColored
     ? mixColor(mutedFg, urgentColor, 0.4) : mutedFg
-  readonly property color urgentColor: root.bar ? root.bar.urgent : Color.urgent
+  readonly property color urgentColor: root.bar ? root.bar.urgent : Commons.Color.urgent
   readonly property string panelFont: root.bar ? root.bar.fontFamily : Style.font.family
 
   readonly property int refreshSeconds: Math.max(5, parseInt(setting("refreshIntervalSec", 60), 10) || 60)
@@ -194,7 +195,7 @@ Panel {
       if (dir === "down") return paletteColor("down", base)
       return base
     }
-    if (dir === "up") return Color.accent
+    if (dir === "up") return Commons.Color.accent
     if (dir === "down") return urgentColor
     return base
   }
@@ -220,7 +221,7 @@ Panel {
 
   // Accent/urgent carriers, resolved once so the mono branch is in one place. Both
   // prefer the core's palette, falling back to the shell theme for older documents.
-  readonly property color panelAccent: panelColored ? paletteColor("accent", Color.accent) : panelFg
+  readonly property color panelAccent: panelColored ? paletteColor("accent", Commons.Color.accent) : panelFg
   readonly property color panelUrgent: panelColored ? paletteColor("error", urgentColor) : panelFg
 
   // ---- Compact bar strip model consumed by BarWidget.qml: the CLI-resolved

@@ -2,6 +2,7 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import Quickshell
 import qs.Commons
+import qs.Commons as Commons
 import qs.Ui
 
 // Compact bar strip for tickerbar: the CLI-curated subset (config `display.bar`,
@@ -60,7 +61,7 @@ BarWidget {
     ? (marketPanel.lifecycle === "stale" || marketPanel.pluginStale === true) : false
 
   // barForeground (not foreground) so the strip follows the bar's transparent-mode color.
-  readonly property color baseFg: root.bar ? root.bar.barForeground : Color.foreground
+  readonly property color baseFg: root.bar ? root.bar.barForeground : Commons.Color.foreground
   // Same class glyph the waybar tooltip uses for stocks (nf-fa-line_chart);
   // shown alone while loading, on error, and on vertical bars.
   readonly property string glyph: ""

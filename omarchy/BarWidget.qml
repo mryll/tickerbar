@@ -13,9 +13,12 @@ BarWidget {
   id: root
   moduleName: "mryll.tickerbar"
 
-  // Typed view of the loaded panel (TickerPanel is the sibling TickerPanel.qml;
-  // the distinct name avoids any clash with qs.Ui's Panel base type).
-  readonly property TickerPanel marketPanel: panelLoader.item as TickerPanel
+  // The loaded panel (TickerPanel.qml). Untyped, like the other widgets of the
+  // family: since Omarchy 4.0.5 the shell compiles the plugin under qs:// while
+  // Qt.resolvedUrl gives the Loader a file:// URL, so the same file is two QML
+  // types and a cast of the item to TickerPanel was always null, with no log
+  // line (tickerbar#3).
+  readonly property var marketPanel: panelLoader.item
 
   function injectPanel() {
     var target = root.marketPanel

@@ -359,3 +359,18 @@ fn the_budget_matches_the_hosts_layout_on_synthetic_bars() {
         "unexpected scenarios in the harness output"
     );
 }
+
+#[test]
+fn the_loaded_panel_is_never_cast_to_its_file_type() {
+    // tickerbar#3: the Loader gets a file:// URL while the shell compiled the
+    // plugin under qs://, so `item as TickerPanel` is null on Omarchy 4.0.5+
+    // and the strip draws nothing, silently.
+    assert!(
+        WIDGET.contains("readonly property var marketPanel: panelLoader.item"),
+        "the panel must be read from the Loader untyped"
+    );
+    assert!(
+        !WIDGET.contains(" as TickerPanel"),
+        "a cast of the loaded panel to its file type is banned"
+    );
+}

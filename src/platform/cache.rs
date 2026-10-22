@@ -76,13 +76,13 @@ fn read_record(path: &Path) -> Option<Record> {
     Some(rec)
 }
 
-/// Open a path for writing, refusing anything that is not a regular file.
+/// Open the lock file for writing, refusing anything that is not a regular file.
 ///
 /// The mirror of `safe_read::read_bounded`, and it exists for the same reason
 /// on the other side of the descriptor: an `open` for WRITE on a FIFO with no
 /// reader blocks for ever, exactly like an `open` for read on one with no
-/// writer. Both cache paths are predictable — `$XDG_CACHE_HOME/tickerbar/` plus
-/// a hash of the request key — so anything that can write that directory can
+/// writer. The lock path is predictable — `$XDG_CACHE_HOME/tickerbar/` plus a
+/// hash of the request key — so anything that can write that directory can
 /// plant a FIFO there and hang the omarchy-shell process tickerbar runs inside.
 /// A `timeout`-wrapped run comes back as exit 124 instead of a widget.
 ///
@@ -93,12 +93,14 @@ fn read_record(path: &Path) -> Option<Record> {
 /// A FIFO with no reader never reaches the check — `O_NONBLOCK` turns that open
 /// into `ENXIO` — and one that HAS a reader opens fine and is caught by it.
 ///
-/// No `O_NOFOLLOW`, deliberately, for the same reason as the read side: the
-/// fstat happens after the kernel resolves symlinks, so a symlink to a FIFO is
-/// already refused and a symlink to a regular file is a legitimate setup.
+/// `O_NOFOLLOW`, unlike the read side. A symlink to a regular file is a
+/// legitimate setup for a file the user owns, but nobody links a lock file
+/// tickerbar creates for itself: a symlink there was planted, and following it
+/// would create or lock whatever file it names. The open fails instead, and the
+/// caller degrades as it does for a FIFO.
 ///
-/// The file is not truncated by the open. `write_record` calls `set_len(0)`
-/// itself, so a tmp file left by a crashed run cannot leave a tail behind.
+/// The file is not truncated by the open: the lock file is only ever locked,
+/// never written.
 fn open_regular_for_write(path: &Path) -> std::io::Result<fs::File> {
     #[cfg(unix)]
     let file = {
@@ -107,7 +109,7 @@ fn open_regular_for_write(path: &Path) -> std::io::Result<fs::File> {
             .create(true)
             .write(true)
             .truncate(false)
-            .custom_flags(libc::O_NONBLOCK)
+            .custom_flags(libc::O_NONBLOCK | libc::O_NOFOLLOW)
             .open(path)?
     };
     #[cfg(not(unix))]
@@ -138,10 +140,35 @@ fn open_regular_for_write(path: &Path) -> std::io::Result<fs::File> {
     Ok(file)
 }
 
+/// Create `path` as a brand-new regular file, never opening one that exists.
+///
+/// The tmp file `write_record` renames from sits at a predictable path, so
+/// whatever is there may have been planted. Opening it, even after a type
+/// check, writes through a symlink or a hard link into the file it names. So
+/// the old entry is unlinked (which removes a symlink, never its target) and
+/// the file is created with `O_EXCL`, which refuses any entry that came back in
+/// between, a symlink included. A FIFO is never opened either, so it cannot
+/// block, and a tmp left by a crashed run cannot leave a tail behind.
+///
+/// Writes run under the key's lock, so no other instance owns this tmp.
+fn create_fresh(path: &Path) -> std::io::Result<fs::File> {
+    match fs::remove_file(path) {
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e),
+        _ => {}
+    }
+    let mut opts = fs::OpenOptions::new();
+    opts.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        opts.mode(0o600).custom_flags(libc::O_NOFOLLOW);
+    }
+    opts.open(path)
+}
+
 fn write_record(path: &Path, rec: &Record) {
     if let Ok(body) = serde_json::to_string(rec) {
         let tmp = path.with_extension("tmp");
-        // `fs::write` was an unguarded `File::create` on a predictable path.
         // Everything below stays silent on failure: a cache that cannot be
         // written is not worth failing a run over.
         if write_whole(&tmp, body.as_bytes()).is_ok() {
@@ -152,9 +179,7 @@ fn write_record(path: &Path, rec: &Record) {
 
 fn write_whole(path: &Path, body: &[u8]) -> std::io::Result<()> {
     use std::io::Write;
-    let mut f = open_regular_for_write(path)?;
-    f.set_len(0)?;
-    f.write_all(body)
+    create_fresh(path)?.write_all(body)
 }
 
 fn served_stale(mut quotes: Vec<Quote>) -> Vec<Quote> {
@@ -412,46 +437,135 @@ mod tests {
         unsafe { libc::close(rfd) };
     }
 
+    fn record_at(now: DateTime<Utc>, price: f64) -> Record {
+        Record {
+            schema_version: SCHEMA_VERSION,
+            fetched_at: now,
+            quotes: vec![q(price, now)],
+            backoff_until: None,
+        }
+    }
+
     /// The tmp file `write_record` renames from sits at a predictable path too.
+    /// A FIFO there is unlinked, never opened, so the write neither blocks nor
+    /// goes through it.
     #[cfg(unix)]
     #[test]
-    fn a_fifo_planted_at_the_tmp_path_refuses_the_write_instead_of_blocking() {
+    fn a_fifo_planted_at_the_tmp_path_is_replaced_instead_of_blocking() {
         let dir = tempdir();
         let path = key_file(&dir, "fifo2");
         mkfifo(&path.with_extension("tmp"));
         let now = Utc::now();
-        write_record(
-            &path,
-            &Record {
-                schema_version: SCHEMA_VERSION,
-                fetched_at: now,
-                quotes: vec![q(7.0, now)],
-                backoff_until: None,
-            },
-        );
-        assert!(!path.exists(), "no record may be published through a FIFO");
+        write_record(&path, &record_at(now, 7.0));
+        let rec = read_record(&path).expect("the record was published");
+        assert_eq!(rec.quotes[0].price, Some(7.0));
     }
 
     /// A tmp file left behind by a crashed run is longer than the new record.
-    /// The open no longer truncates, so `set_len(0)` is what keeps the tail of
-    /// the old body out of the renamed file.
+    /// It is replaced, not reused, so no tail of the old body reaches the
+    /// renamed file.
     #[test]
     fn a_leftover_tmp_file_does_not_leave_a_tail_in_the_new_record() {
         let dir = tempdir();
         let path = key_file(&dir, "leftover");
         std::fs::write(path.with_extension("tmp"), vec![b'x'; 64 * 1024]).unwrap();
         let now = Utc::now();
-        write_record(
-            &path,
-            &Record {
-                schema_version: SCHEMA_VERSION,
-                fetched_at: now,
-                quotes: vec![q(7.0, now)],
-                backoff_until: None,
-            },
-        );
+        write_record(&path, &record_at(now, 7.0));
         let rec = read_record(&path).expect("a clean record was published");
         assert_eq!(rec.quotes[0].price, Some(7.0));
+    }
+
+    /// A symlink planted at the tmp path must not carry the write into the file
+    /// it names (marketplace review of 0.7.6): before, the open followed it,
+    /// truncated the target and wrote the record over it.
+    #[cfg(unix)]
+    #[test]
+    fn a_symlink_planted_at_the_tmp_path_never_writes_through_to_its_target() {
+        let dir = tempdir();
+        let victim = dir.join("victim");
+        std::fs::write(&victim, b"private").unwrap();
+        let path = key_file(&dir, "link1");
+        std::os::unix::fs::symlink(&victim, path.with_extension("tmp")).unwrap();
+
+        let now = Utc::now();
+        write_record(&path, &record_at(now, 7.0));
+
+        assert_eq!(std::fs::read(&victim).unwrap(), b"private");
+        assert!(!std::fs::symlink_metadata(&path).unwrap().is_symlink());
+        let rec = read_record(&path).expect("the record was published");
+        assert_eq!(rec.quotes[0].price, Some(7.0));
+    }
+
+    /// A hard link needs no following at all: opening the tmp path opens the
+    /// victim's inode. Only replacing the entry keeps the write off it.
+    #[cfg(unix)]
+    #[test]
+    fn a_hard_link_planted_at_the_tmp_path_never_writes_into_its_inode() {
+        let dir = tempdir();
+        let victim = dir.join("victim");
+        std::fs::write(&victim, b"private").unwrap();
+        let path = key_file(&dir, "link4");
+        std::fs::hard_link(&victim, path.with_extension("tmp")).unwrap();
+
+        write_record(&path, &record_at(Utc::now(), 7.0));
+
+        assert_eq!(std::fs::read(&victim).unwrap(), b"private");
+        let rec = read_record(&path).expect("the record was published");
+        assert_eq!(rec.quotes[0].price, Some(7.0));
+    }
+
+    /// A dangling symlink is the other half: following it would CREATE the file
+    /// it names, anywhere the user can write.
+    #[cfg(unix)]
+    #[test]
+    fn a_dangling_symlink_at_the_tmp_path_creates_nothing_at_its_target() {
+        let dir = tempdir();
+        let victim = dir.join("never-created");
+        let path = key_file(&dir, "link2");
+        std::os::unix::fs::symlink(&victim, path.with_extension("tmp")).unwrap();
+
+        write_record(&path, &record_at(Utc::now(), 7.0));
+
+        assert!(!victim.exists(), "the write followed the symlink");
+    }
+
+    /// The lock file cannot be replaced like the tmp (other instances hold it
+    /// open), so a symlink there is refused: the open neither creates nor locks
+    /// the file it names, and the run degrades to serving stale.
+    #[cfg(unix)]
+    #[test]
+    fn a_symlink_planted_at_the_lock_path_is_refused_and_serves_stale() {
+        let dir = tempdir();
+        let t0 = Utc::now() - Duration::seconds(120);
+        let _ = get_or_fetch(
+            &dir,
+            "link3",
+            Duration::seconds(60),
+            t0,
+            FetchPolicy::Normal,
+            || Ok(vec![q(42.0, t0)]),
+        );
+        let lockp = key_file(&dir, "link3").with_extension("lock");
+        std::fs::remove_file(&lockp).expect("the lock file exists after a run");
+        let victim = dir.join("never-created");
+        std::os::unix::fs::symlink(&victim, &lockp).unwrap();
+
+        let mut called = false;
+        let out = get_or_fetch(
+            &dir,
+            "link3",
+            Duration::seconds(0),
+            Utc::now(),
+            FetchPolicy::Normal,
+            || {
+                called = true;
+                Ok(vec![])
+            },
+        );
+        assert!(!victim.exists(), "the lock open followed the symlink");
+        assert!(!called, "an unusable lock must degrade to serving stale");
+        assert_eq!(out[0].state, QuoteState::Stale);
+        assert_eq!(out[0].price, Some(42.0));
     }
 
     #[test]

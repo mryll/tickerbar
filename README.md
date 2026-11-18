@@ -185,7 +185,7 @@ Find your asset class in the first column. That row gives you the `provider` and
 | A commodity | `commodity` | `symbol` | `gold`, `silver`, `wti`, `brent`, `natgas`, `copper`, `platinum`, `palladium`, or a raw symbol (`@GC.1`). |
 | A treasury yield | `rate` | `symbol` | `us10y`, `us2y`, `us5y`, `us30y`. Shown as a percent. |
 | A currency pair | `frankfurter` | `base`, `quote` | Two currency codes: `base = "eur"`, `quote = "usd"`. Daily reference rates. |
-| The Argentine dollar | `dolarapi` | `casa`, `side` | `casa = "blue"`, `casa = "mep"`, and the other houses. Prices in ARS. |
+| The Argentine dollar | `dolarapi` | `casa`, `side` | `casa` is `oficial`, `blue`, `bolsa` (the MEP dollar), `contadoconliqui`, `mayorista`, `cripto` or `tarjeta`. `side` is `buy`, `sell` (the default) or `mid`. Prices in ARS. |
 | The Argentine market (BYMA) | `data912` | `panel`, `symbol` | `panel` is `acciones`, `bonos`, `cedears` or `corp`. Prices in ARS, about 2 hours late. |
 | A stock, from a documented source | `finnhub` | `symbol` | A ticker. Needs a free key (see below). |
 
